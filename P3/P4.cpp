@@ -247,7 +247,7 @@ int main(int argc, char* argv[])
 	int renderStatus = SDL_RenderGeometry(renderer,
 		texture,
 		vertices, 4,
-		indices, 3);
+		indices, 6);
 
 	cout << "Rendered: " << renderStatus << SDL_GetError() << endl;
 
