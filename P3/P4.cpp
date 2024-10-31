@@ -163,6 +163,23 @@ void renderFrame() {
 	++frame;
 }
 
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* texture, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
+	// initially make a simple fill operation
+
+	for (int t = 0; t < num_indices; t += 3) {
+		for (int i = 0; i < 3; ++i) {
+			int idxFrom = indices[i + t];
+			int idxTo = indices[(i + 1) % 3 + t];
+
+			const SDL_Vertex* fromV = vertices + idxFrom;
+			const SDL_Vertex* toV = vertices + idxTo;
+
+			SDL_RenderDrawLine(renderer, (int)fromV->position.x, (int)fromV->position.y, (int)toV->position.x, (int)toV->position.y);
+		}
+	}
+	
+}
+
 int main(int argc, char* argv[])
 {
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -201,16 +218,16 @@ int main(int argc, char* argv[])
 	}
 	
 	unsigned char pixels[tx * ty * 4] = {};
+	int cnt = 0;
 	for (int y=0;y<ty;y++) {
 		for (int x = 0; x < tx; ++x) {
 			int xy = 4 * (y * tx + x);
 			
-			bool black = 0 == (y % 2) + (x % 2);
-
-			pixels[xy + 0] = black ? 0 : 255 ;
-			pixels[xy + 1] = 0;
-			pixels[xy + 2] = 0;
+			pixels[xy + 0] = (cnt % 3) == 0 ? 255 : 0;
+			pixels[xy + 1] = (cnt % 3) == 1 ? 255 : 0;
+			pixels[xy + 2] = (cnt % 3) == 2 ? 255 : 0;
 			pixels[xy + 3] = 255;
+			++cnt;
 		}
 	}
 
@@ -226,20 +243,26 @@ int main(int argc, char* argv[])
 	SDL_UpdateTexture(texture, nullptr, pixels, tx * 4);
 	
 	SDL_Vertex vertices[6];
+	float aX = 50;
+	float aY = 100;
+
+	float w = 200;
+	float h = 200;
+
 	vertices[0].color = { 255,255,255,255 };
-	vertices[0].position = { 100,100 };
+	vertices[0].position = { aX,aY };
 	vertices[0].tex_coord = { 0.0, 0.0 };
 	
 	vertices[1].color = { 255,255,255,255 };
-	vertices[1].position = { 200,100 };
+	vertices[1].position = { aX+w,aY};
 	vertices[1].tex_coord = { 1.0, 0.0 };
 	
 	vertices[2].color = { 255,255,255,255 };
-	vertices[2].position = { 100,200 };
+	vertices[2].position = { aX,aY+h};
 	vertices[2].tex_coord = { 0.0, 1.0 };
 
 	vertices[3].color = { 255,255,255,255 };
-	vertices[3].position = { 200,200 };
+	vertices[3].position = { aX+w,aY+h};
 	vertices[3].tex_coord = { 1.0, 1.0 };
 
 	int indices[6] = { 0,1,2, 1,2,3 };
@@ -248,6 +271,16 @@ int main(int argc, char* argv[])
 		texture,
 		vertices, 4,
 		indices, 6);
+
+	for (int i = 0; i < 4; ++i) {
+		vertices[i].position.x += 350;
+	}
+
+	Naive_RenderGeometry(renderer,
+		texture,
+		vertices, 4,
+		indices, 6);
+	
 
 	cout << "Rendered: " << renderStatus << SDL_GetError() << endl;
 
