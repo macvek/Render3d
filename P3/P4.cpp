@@ -118,8 +118,8 @@ void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
 		DoublePoint projected = toApply.ProjectOrtho(*ptr);
 		
 		SDL_Vertex each;
-		each.position.x = projected.x;
-		each.position.y = projected.y;
+		each.position.x = (float)projected.x;
+		each.position.y = (float)projected.y;
 
 		vertices.push_back(each);
 	}
@@ -222,7 +222,8 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 }
 
 void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
-	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works
+	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
+	// good subject to optimize, but should work fine
 	int sortedIndices[3];
 
 	float offLeft;
@@ -254,7 +255,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 		// check for reaching bottom line
 		
 		for (int i = 0; i < lines; ++i) {
-			SDL_RenderDrawLine(renderer, (int)(left->x + i*offLeft), left->y + i, (int)(right->x + i * offRight), left->y + i);
+			SDL_RenderDrawLine(renderer, round(left->x + i*offLeft), left->y + i, round(right->x + i * offRight), left->y + i);
 		}
 	}
 	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
@@ -275,23 +276,22 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 
 		// draw towards horizontal line
 		for (int i = 0; i < lines+1; ++i) {
-			int leftX = (int)(middle->x + i * offLeft);
-			int rightX = (int)(middle->x + i * offRight);
+			double leftX = round(middle->x + i * offLeft);
+			double rightX = round(middle->x + i * offRight);
 			int leftY = middle->y + i;
 			int rightY = leftY;
 
 			SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
 		}
 
-		
 		if (left->y < right->y) {
 			offLeft = Naive_WalkTowards(left->x, left->y, right->x, right->y);
 
 			int nextLines = right->y - left->y;
 
 			for (int i = 0; i < nextLines+1; ++i) {
-				int leftX = (int)(left->x + i * offLeft);
-				int rightX = (int)(middle->x + (lines+i) * offRight);
+				double leftX = round(left->x + i * offLeft);
+				double rightX = round(middle->x + (lines+i) * offRight);
 				int leftY = left->y + i;
 				int rightY = leftY;
 
@@ -300,7 +300,6 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 		}
 		else {
 			offRight = Naive_WalkTowards(right->x, right->y, left->x, left->y);
-
 			int nextLines = left->y - right->y;
 
 			for (int i = 0; i < nextLines + 1; ++i) {
@@ -312,18 +311,14 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 				SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
 			}
 		}
-
-
-
 	}
-
 }
 
 void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
 	// initially make a simple fill operation
 
 	bool drawFill = true;
-	bool drawWireframe = false;
+	bool drawWireframe = true;
 
 	if (drawFill) {
 		Naive_FillVertices(renderer, vertices, indices + 3);
