@@ -133,6 +133,7 @@ void renderShapeOrthoWithOffset(Shape& s, M44& base, double offX, double offY) {
 int frame = 0;
 
 void renderFrame() {
+	return;
 	if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE)) {
 		cout << "SDL_SetRenderDrawColor: " << SDL_GetError() << endl;
 	}
@@ -163,21 +164,150 @@ void renderFrame() {
 	++frame;
 }
 
+void Naive_SortVertices(const SDL_Vertex* triangle, const int *indices, int* outIndices) {
+	const SDL_Vertex* t = triangle;
+	
+	int a = *(indices + 0);
+	int b = *(indices + 1);
+	int c = *(indices + 2);
+
+	int tmp;
+	int list[3] = { a,b,c };
+	if (t[a].position.y > t[b].position.y) { tmp = a; a = b; b = tmp; } // a<=>b
+	if (t[a].position.y > t[c].position.y) { tmp = a; a = c; c = tmp; } // a<=>c
+	if (t[b].position.y > t[c].position.y) { tmp = b; b = c; c = tmp; } // b<=>c
+
+	if (t[a].position.y == t[b].position.y) { 
+		// triangle with top horizontal line ; sort on X only top line and exit
+		if (t[a].position.x > t[b].position.x) { tmp = a; a = b; b = tmp; } // a<=>b;
+	}
+	else {
+		// single top vertex ; order other 2 on X;
+		if (t[b].position.x > t[c].position.x) { tmp = b; b = c; c = tmp; } // b<=>c;
+	}
+
+	outIndices[0] = a;
+	outIndices[1] = b;
+	outIndices[2] = c;
+}
+
+float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
+	return (toX - fromX) / (toY - fromY);
+}
+
+void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
+	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works
+	int sortedIndices[3];
+	float leftX;
+	float rightX;
+
+	float offLeft;
+	float offRight;
+
+	Naive_SortVertices(vertices, indices, sortedIndices);
+
+	const SDL_Vertex* a = vertices + *(sortedIndices + 0);
+	const SDL_Vertex* b = vertices + *(sortedIndices + 1);
+	const SDL_Vertex* c = vertices + *(sortedIndices + 2);
+
+	bool fromSingle = true;
+
+	int cursor;
+	int bottom;
+
+	if (a->position.y == b->position.y) { // skip top triangle, setup walkers towards bottom point
+		cursor = (int)a->position.y;
+		bottom = (int)c->position.y;
+
+		leftX = a->position.x;
+		rightX = b->position.x;
+
+		offLeft = Naive_WalkTowards(leftX, a->position.y, c->position.x, c->position.y);
+		offRight = Naive_WalkTowards(rightX, b->position.y, c->position.x, c->position.y);
+		
+		// check for reaching bottom line
+		for (cursor; cursor <= bottom; ++cursor) {
+			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
+			leftX += offLeft;
+			rightX += offRight;
+		}
+	}
+	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
+		cursor = (int)a->position.y;
+		int sndBottom;
+		bool leftIsHigher;
+
+		if (b->position.y < c->position.y) { // draw until reaching first point
+			bottom = (int)b->position.y;
+			sndBottom = (int)c->position.y;
+			leftIsHigher = true;
+		}
+		else {
+			bottom = (int)c->position.y;
+			sndBottom = (int)b->position.y;
+			leftIsHigher = false;
+		}
+
+		leftX = a->position.x;
+		rightX = leftX;
+
+		offLeft = Naive_WalkTowards(a->position.x, a->position.y, b->position.x, b->position.y);
+		offRight = Naive_WalkTowards(a->position.x, a->position.y, c->position.x, c->position.y);
+
+		// draw towards horizontal line
+		for (cursor; cursor <= bottom; ++cursor) {
+			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
+			leftX += offLeft;
+			rightX += offRight;
+		}
+
+		if (bottom == sndBottom) { // nothing more to draw
+			return;
+		}
+		
+		// point left or right cursor towards last point
+		if (leftIsHigher) {
+			offLeft = Naive_WalkTowards(b->position.x, b->position.y, c->position.x, c->position.y);
+		}
+		else {
+			offRight = Naive_WalkTowards(c->position.x, c->position.y, b->position.x, b->position.y);
+		}
+
+		for (cursor; cursor <= sndBottom; ++cursor) {
+			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
+			leftX += offLeft;
+			rightX += offRight;
+		}
+
+	}
+
+}
+
 void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* texture, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
 	// initially make a simple fill operation
 
-	for (int t = 0; t < num_indices; t += 3) {
-		for (int i = 0; i < 3; ++i) {
-			int idxFrom = indices[i + t];
-			int idxTo = indices[(i + 1) % 3 + t];
+	bool drawFill = true;
+	bool drawWireframe = false;
 
-			const SDL_Vertex* fromV = vertices + idxFrom;
-			const SDL_Vertex* toV = vertices + idxTo;
+	if (drawFill) {
+		Naive_FillVertices(renderer, vertices, indices + 3);
+		Naive_FillVertices(renderer, vertices, indices);
+		
+	}
 
-			SDL_RenderDrawLine(renderer, (int)fromV->position.x, (int)fromV->position.y, (int)toV->position.x, (int)toV->position.y);
+	if (drawWireframe) {
+		for (int t = 0; t < num_indices; t += 3) {
+			for (int i = 0; i < 3; ++i) {
+				int idxFrom = indices[i + t];
+				int idxTo = indices[(i + 1) % 3 + t];
+
+				const SDL_Vertex* fromV = vertices + idxFrom;
+				const SDL_Vertex* toV = vertices + idxTo;
+
+				SDL_RenderDrawLine(renderer, (int)fromV->position.x, (int)fromV->position.y, (int)toV->position.x, (int)toV->position.y);
+			}
 		}
 	}
-	
 }
 
 int main(int argc, char* argv[])
@@ -258,7 +388,7 @@ int main(int argc, char* argv[])
 	vertices[1].tex_coord = { 1.0, 0.0 };
 	
 	vertices[2].color = { 255,255,255,255 };
-	vertices[2].position = { aX,aY+h};
+	vertices[2].position = { aX,aY+h+100};
 	vertices[2].tex_coord = { 0.0, 1.0 };
 
 	vertices[3].color = { 255,255,255,255 };
@@ -275,7 +405,7 @@ int main(int argc, char* argv[])
 	for (int i = 0; i < 4; ++i) {
 		vertices[i].position.x += 350;
 	}
-
+	SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
 	Naive_RenderGeometry(renderer,
 		texture,
 		vertices, 4,
@@ -285,7 +415,7 @@ int main(int argc, char* argv[])
 	cout << "Rendered: " << renderStatus << SDL_GetError() << endl;
 
 	
-	//renderFrame();
+	renderFrame();
 	SDL_RenderPresent(renderer);
 	
 	SDL_Event e;
@@ -299,7 +429,7 @@ int main(int argc, char* argv[])
 				}
 			}
 			else if (e.type == globalCustomEventId) {
-				//renderFrame();
+				renderFrame();
 			}
 			else if (e.type == SDL_QUIT) {
 				break;
