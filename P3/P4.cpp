@@ -127,7 +127,7 @@ void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
 	int indices[6];
 	indices[0] = 0;
 	indices[1] = 1;
-	indices[2] = 2;
+	indices[2] = 3;
 
 	indices[3] = 1;
 	indices[4] = 2;
@@ -138,14 +138,6 @@ void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
 
 void renderShapeOrtho(M44& toApply, Shape& shape) {
 	renderShapeNaiveOrtho(toApply, shape);
-	return;
-
-	for (int i = 0; i < shape.points.size(); i++) {
-		DoublePoint from = toApply.ProjectOrtho(shape.points[i]);
-		DoublePoint to = toApply.ProjectOrtho(shape.points[(i + 1) % shape.points.size()]);
-
-		SDL_RenderDrawLine(renderer, (int)floor(from.x), (int)floor(from.y), (int)floor(to.x), (int)floor(to.y));
-	}
 }
 
 Shape faceFront = { { {-80,-80, 50}, {80,-80, 50}, {80,80, 50}, {-80,80, 50} } };
@@ -232,8 +224,6 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works
 	int sortedIndices[3];
-	float leftX;
-	float rightX;
 
 	float offLeft;
 	float offRight;
@@ -246,72 +236,84 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 
 	bool fromSingle = true;
 
-	int cursor;
-	int bottom;
-
+	const SDL_FPoint* left;
+	const SDL_FPoint* right;
+	const SDL_FPoint* middle;
+	
+	int lines;
 	if (a->position.y == b->position.y) { // skip top triangle, setup walkers towards bottom point
-		cursor = (int)a->position.y;
-		bottom = (int)c->position.y;
+		lines = c->position.y - a->position.y;
 
-		leftX = a->position.x;
-		rightX = b->position.x;
-
-		offLeft = Naive_WalkTowards(leftX, a->position.y, c->position.x, c->position.y);
-		offRight = Naive_WalkTowards(rightX, b->position.y, c->position.x, c->position.y);
+		left = &a->position;
+		right = &b->position;
+		middle = &c->position;
+		
+		offLeft = Naive_WalkTowards(left->x, left->y, middle->x, middle->y);
+		offRight = Naive_WalkTowards(right->x, right->y, middle->x, middle->y);
 		
 		// check for reaching bottom line
-		for (cursor; cursor <= bottom; ++cursor) {
-			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
-			leftX += offLeft;
-			rightX += offRight;
+		
+		for (int i = 0; i < lines; ++i) {
+			SDL_RenderDrawLine(renderer, (int)(left->x + i*offLeft), left->y + i, (int)(right->x + i * offRight), left->y + i);
 		}
 	}
 	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
-		cursor = (int)a->position.y;
-		int sndBottom;
-		bool leftIsHigher;
 
-		if (b->position.y < c->position.y) { // draw until reaching first point
-			bottom = (int)b->position.y;
-			sndBottom = (int)c->position.y;
-			leftIsHigher = true;
+		middle = &a->position;
+		left = &b->position;
+		right = &c->position;
+
+		if (left->y < right->y) {
+			lines = left->y - middle->y;
 		}
 		else {
-			bottom = (int)c->position.y;
-			sndBottom = (int)b->position.y;
-			leftIsHigher = false;
-		}
-
-		leftX = a->position.x;
-		rightX = leftX;
-
-		offLeft = Naive_WalkTowards(a->position.x, a->position.y, b->position.x, b->position.y);
-		offRight = Naive_WalkTowards(a->position.x, a->position.y, c->position.x, c->position.y);
-
-		// draw towards horizontal line
-		for (cursor; cursor <= bottom; ++cursor) {
-			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
-			leftX += offLeft;
-			rightX += offRight;
-		}
-
-		if (bottom == sndBottom) { // nothing more to draw
-			return;
+			lines = right->y - middle->y;
 		}
 		
-		// point left or right cursor towards last point
-		if (leftIsHigher) {
-			offLeft = Naive_WalkTowards(b->position.x, b->position.y, c->position.x, c->position.y);
-		}
-		else {
-			offRight = Naive_WalkTowards(c->position.x, c->position.y, b->position.x, b->position.y);
+		offLeft = Naive_WalkTowards(middle->x, middle->y, left->x, left->y);
+		offRight = Naive_WalkTowards(middle->x, middle->y, right->x, right->y);
+
+		// draw towards horizontal line
+		for (int i = 0; i < lines+1; ++i) {
+			int leftX = (int)(middle->x + i * offLeft);
+			int rightX = (int)(middle->x + i * offRight);
+			int leftY = middle->y + i;
+			int rightY = leftY;
+
+			SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
 		}
 
-		for (cursor; cursor <= sndBottom; ++cursor) {
-			SDL_RenderDrawLine(renderer, (int)leftX, cursor, (int)rightX, cursor);
-			leftX += offLeft;
-			rightX += offRight;
+		
+		if (left->y < right->y) {
+			offLeft = Naive_WalkTowards(left->x, left->y, right->x, right->y);
+
+			int nextLines = right->y - left->y;
+
+			for (int i = 0; i < nextLines+1; ++i) {
+				int leftX = (int)(left->x + i * offLeft);
+				int rightX = (int)(middle->x + (lines+i) * offRight);
+				int leftY = left->y + i;
+				int rightY = leftY;
+
+				SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
+			}
 		}
+		else {
+			offRight = Naive_WalkTowards(right->x, right->y, left->x, left->y);
+
+			int nextLines = left->y - right->y;
+
+			for (int i = 0; i < nextLines + 1; ++i) {
+				int leftX = (int)(middle->x + (lines + i) * offLeft); 
+				int rightX = (int)(right->x + i * offRight);
+				int leftY = right->y + i;
+				int rightY = leftY;
+
+				SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
+			}
+		}
+
+
 
 	}
 
@@ -326,10 +328,10 @@ void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Verte
 	if (drawFill) {
 		Naive_FillVertices(renderer, vertices, indices + 3);
 		Naive_FillVertices(renderer, vertices, indices);
-		
 	}
 
 	if (drawWireframe) {
+		SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
 		for (int t = 0; t < num_indices; t += 3) {
 			for (int i = 0; i < 3; ++i) {
 				int idxFrom = indices[i + t];
@@ -460,6 +462,9 @@ int main(int argc, char* argv[])
 				auto key = keyboardEvent->keysym.scancode;
 				if (key == SDL_SCANCODE_ESCAPE) {
 					break;
+				}
+				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_R) {
+					renderFrame();
 				}
 			}
 			else if (e.type == globalCustomEventId) {
