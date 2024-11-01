@@ -221,6 +221,30 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 	return (toX - fromX) / (toY - fromY);
 }
 
+void Naive_DrawHorizLine(SDL_Renderer* renderer, int x1, int x2, int lineY) {
+	Uint8 r, g, b, a;
+	Uint8 nR, nG, nB;
+	SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
+
+	nR = r > 196 ? r : 196;
+	nG = g > 196 ? g : 196;
+	nB = b > 196 ? b : 196;
+
+	for (int i = x1; i <= x2; ++i) {
+		if ((i % 2) + (lineY % 2) % 2) {
+			SDL_SetRenderDrawColor(renderer, nR, nG, nB, a);
+		}
+		else {
+			SDL_SetRenderDrawColor(renderer, r, g, b, a);
+		}
+
+		SDL_RenderDrawPoint(renderer, i, lineY);
+	}
+
+	SDL_SetRenderDrawColor(renderer, r, g, b, a);
+	
+}
+
 void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
 	// good subject to optimize, but should work fine
@@ -255,7 +279,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 		// check for reaching bottom line
 		
 		for (int i = 0; i < lines; ++i) {
-			SDL_RenderDrawLine(renderer, round(left->x + i*offLeft), left->y + i, round(right->x + i * offRight), left->y + i);
+			Naive_DrawHorizLine(renderer, round(left->x + i*offLeft), round(right->x + i * offRight), left->y + i);
 		}
 	}
 	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
@@ -278,10 +302,9 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 		for (int i = 0; i < lines+1; ++i) {
 			double leftX = round(middle->x + i * offLeft);
 			double rightX = round(middle->x + i * offRight);
-			int leftY = middle->y + i;
-			int rightY = leftY;
-
-			SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
+			int lineY = middle->y + i;
+			
+			Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
 		}
 
 		if (left->y < right->y) {
@@ -292,10 +315,10 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			for (int i = 0; i < nextLines+1; ++i) {
 				double leftX = round(left->x + i * offLeft);
 				double rightX = round(middle->x + (lines+i) * offRight);
-				int leftY = left->y + i;
-				int rightY = leftY;
+				int lineY = left->y + i;
+				
 
-				SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
+				Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
 			}
 		}
 		else {
@@ -305,10 +328,9 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			for (int i = 0; i < nextLines + 1; ++i) {
 				int leftX = (int)(middle->x + (lines + i) * offLeft); 
 				int rightX = (int)(right->x + i * offRight);
-				int leftY = right->y + i;
-				int rightY = leftY;
+				int lineY = right->y + i;
 
-				SDL_RenderDrawLine(renderer, leftX, leftY, rightX, rightY);
+				Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
 			}
 		}
 	}
