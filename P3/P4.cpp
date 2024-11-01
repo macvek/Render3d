@@ -24,6 +24,7 @@ Uint32 tickFrame(Uint32 interval, void* param) {
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices);
 
 struct DoublePoint {
 	double x, y, z;
@@ -109,7 +110,36 @@ struct Shape {
 };
 
 
+
+void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
+	
+	std::vector<SDL_Vertex> vertices;
+	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
+		DoublePoint projected = toApply.ProjectOrtho(*ptr);
+		
+		SDL_Vertex each;
+		each.position.x = projected.x;
+		each.position.y = projected.y;
+
+		vertices.push_back(each);
+	}
+	
+	int indices[6];
+	indices[0] = 0;
+	indices[1] = 1;
+	indices[2] = 2;
+
+	indices[3] = 1;
+	indices[4] = 2;
+	indices[5] = 3;
+
+	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
+}
+
 void renderShapeOrtho(M44& toApply, Shape& shape) {
+	renderShapeNaiveOrtho(toApply, shape);
+	return;
+
 	for (int i = 0; i < shape.points.size(); i++) {
 		DoublePoint from = toApply.ProjectOrtho(shape.points[i]);
 		DoublePoint to = toApply.ProjectOrtho(shape.points[(i + 1) % shape.points.size()]);
@@ -133,7 +163,6 @@ void renderShapeOrthoWithOffset(Shape& s, M44& base, double offX, double offY) {
 int frame = 0;
 
 void renderFrame() {
-	return;
 	if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE)) {
 		cout << "SDL_SetRenderDrawColor: " << SDL_GetError() << endl;
 	}
@@ -156,8 +185,13 @@ void renderFrame() {
 
 	base.Mult(rotX);
 
+	SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
 	renderShapeOrthoWithOffset(faceFront, base, 400, 300);
+
+	SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
 	renderShapeOrthoWithOffset(faceMiddle, base, 400, 300);
+
+	SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
 	renderShapeOrthoWithOffset(faceBack, base, 400, 300);
 
 	SDL_RenderPresent(renderer);
@@ -283,7 +317,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 
 }
 
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* texture, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
 	// initially make a simple fill operation
 
 	bool drawFill = true;
