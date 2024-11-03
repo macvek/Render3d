@@ -12,6 +12,7 @@ double SCREEN_HEIGHT = 600;
 Uint32 globalCustomEventId = 0;
  
 bool render = true;
+bool useOrtho = false;
 Uint32 tickFrame(Uint32 interval, void* param) {
 	SDL_Event e = {};
 	e.type = globalCustomEventId;
@@ -103,6 +104,22 @@ struct M44 {
 		return DoublePoint{ nX, nY };
 	}
 
+	DoublePoint ProjectPerspective(DoublePoint& p, double viewWidth, double viewHeight, double F) {
+		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
+		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
+		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
+
+		double focalMult = F / (F+nZ);
+
+		double xPerspective = nX * focalMult;
+		double yPerspective = nY * focalMult;
+
+		double xOff = viewWidth / 2;
+		double yOff = viewHeight / 2;
+
+		return DoublePoint{ xOff + xPerspective, yOff + yPerspective };
+	}
+
 };
 
 struct Shape {
@@ -110,20 +127,34 @@ struct Shape {
 };
 
 
-
-void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
-	
-	std::vector<SDL_Vertex> vertices;
+void shapeToProjectedVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
 	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
-		DoublePoint projected = toApply.ProjectOrtho(*ptr);
-		
+		DoublePoint projected = toApply.ProjectPerspective(*ptr, 800,600,150);
+
 		SDL_Vertex each;
 		each.position.x = (float)projected.x;
 		each.position.y = (float)projected.y;
 
-		vertices.push_back(each);
+		outVertices.push_back(each);
 	}
-	
+}
+
+void shapeToOrthoVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
+	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
+		DoublePoint projected = toApply.ProjectOrtho(*ptr);
+
+		SDL_Vertex each;
+		each.position.x = (float)projected.x;
+		each.position.y = (float)projected.y;
+
+		outVertices.push_back(each);
+	}
+}
+
+void renderShapeOrtho(M44& toApply, Shape& shape) {
+	std::vector<SDL_Vertex> vertices;
+	shapeToOrthoVertices(toApply, shape, vertices);
+
 	int indices[6];
 	indices[0] = 0;
 	indices[1] = 1;
@@ -136,14 +167,9 @@ void renderShapeNaiveOrtho(M44& toApply, Shape& shape) {
 	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
 }
 
-void renderShapeOrtho(M44& toApply, Shape& shape) {
-	renderShapeNaiveOrtho(toApply, shape);
-}
-
-Shape faceFront = { { {-80,-80, 50}, {80,-80, 50}, {80,80, 50}, {-80,80, 50} } };
-Shape faceMiddle = { { {-90,-90, 0}, {90,-90, 0}, {90,90, 0}, {-90,90, 0} } };
-Shape faceBack = { { {-100,-100, -50}, {100,-100, -50}, {100,100, -50}, {-100,100, -50} } };
-
+Shape faceFront = { { {-70,-70, -50}, {70,-70, -50}, {70,70, -50}, {-70,70, -50} } };
+Shape faceMiddle = { { {-80,-80,0}, {80,-80, 0}, {80,80, 0}, {-80,80, 0} } };
+Shape faceBack = { { {-90,-90, 50}, {90,-90, 50}, {90,90, 50}, {-90,90, 50} } };
 
 void renderShapeOrthoWithOffset(Shape& s, M44& base, double offX, double offY) {
 	M44 flipOffset;
@@ -151,6 +177,27 @@ void renderShapeOrthoWithOffset(Shape& s, M44& base, double offX, double offY) {
 	flipOffset.Mult(base);
 	renderShapeOrtho(flipOffset, s);
 }
+
+void renderShapePerspective(M44& toApply, Shape& shape) {
+	std::vector<SDL_Vertex> vertices;
+	shapeToProjectedVertices(toApply, shape, vertices);
+
+	int indices[6];
+	indices[0] = 0;
+	indices[1] = 1;
+	indices[2] = 3;
+
+	indices[3] = 1;
+	indices[4] = 2;
+	indices[5] = 3;
+
+	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
+}
+
+void renderShapePerspectiveWithOffset(Shape& s, M44& base, double offX, double offY) {
+	renderShapePerspective(base, s);
+}
+
 
 int frame = 0;
 
@@ -177,14 +224,30 @@ void renderFrame() {
 
 	base.Mult(rotX);
 
-	SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
-	renderShapeOrthoWithOffset(faceFront, base, 400, 300);
+	
+	if (useOrtho) {
+		SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
+		renderShapeOrthoWithOffset(faceBack, base, 400, 300);
+		
+		SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
+		renderShapeOrthoWithOffset(faceMiddle, base, 400, 300);
 
-	SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
-	renderShapeOrthoWithOffset(faceMiddle, base, 400, 300);
+		SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
+		renderShapeOrthoWithOffset(faceFront, base, 400, 300);
+	}
+	else {
+		SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
+		renderShapePerspectiveWithOffset(faceBack, base, 400, 300);
 
-	SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
-	renderShapeOrthoWithOffset(faceBack, base, 400, 300);
+		SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
+		renderShapePerspectiveWithOffset(faceMiddle, base, 400, 300);
+
+		SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
+		renderShapePerspectiveWithOffset(faceFront, base, 400, 300);
+
+	}
+
+	
 
 	SDL_RenderPresent(renderer);
 	++frame;
@@ -222,6 +285,17 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 }
 
 void Naive_DrawHorizLine(SDL_Renderer* renderer, int x1, int x2, int lineY) {
+	if (lineY < 0 || lineY > 800) {
+		return;
+	}
+
+	if (x1 < 0) {
+		x1 = 0;
+	}
+
+	if (x2 > 800) {
+		x2 = 800;
+	}
 	Uint8 r, g, b, a;
 	Uint8 nR, nG, nB;
 	SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
@@ -482,6 +556,10 @@ int main(int argc, char* argv[])
 				}
 				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_R) {
 					renderFrame();
+				}
+
+				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_O) {
+					useOrtho = !useOrtho;
 				}
 			}
 			else if (e.type == globalCustomEventId) {
