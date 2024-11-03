@@ -13,6 +13,7 @@ Uint32 globalCustomEventId = 0;
  
 bool render = true;
 bool useOrtho = false;
+bool paused = false;
 Uint32 tickFrame(Uint32 interval, void* param) {
 	SDL_Event e = {};
 	e.type = globalCustomEventId;
@@ -244,13 +245,16 @@ void renderFrame() {
 
 		SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
 		renderShapePerspectiveWithOffset(faceFront, base, 400, 300);
-
 	}
 
 	
 
 	SDL_RenderPresent(renderer);
-	++frame;
+	if (!paused) {
+		++frame;
+		cout << "FRAME: " << frame << endl;
+	}
+	
 }
 
 void Naive_SortVertices(const SDL_Vertex* triangle, const int *indices, int* outIndices) {
@@ -285,6 +289,13 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 }
 
 void Naive_DrawHorizLine(SDL_Renderer* renderer, int x1, int x2, int lineY) {
+	// x1 and x2 are NOT expected that x1 < x2
+	if (x1 > x2) {
+		int t = x1;
+		x1 = x2;
+		x2 = t;
+	}
+
 	if (lineY < 0 || lineY > 800) {
 		return;
 	}
@@ -333,8 +344,6 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 	const SDL_Vertex* b = vertices + *(sortedIndices + 1);
 	const SDL_Vertex* c = vertices + *(sortedIndices + 2);
 
-	bool fromSingle = true;
-
 	const SDL_FPoint* left;
 	const SDL_FPoint* right;
 	const SDL_FPoint* middle;
@@ -377,7 +386,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			double leftX = round(middle->x + i * offLeft);
 			double rightX = round(middle->x + i * offRight);
 			int lineY = middle->y + i;
-			
+
 			Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
 		}
 
@@ -395,7 +404,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 				Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
 			}
 		}
-		else {
+		else if (left->y > right->y) {
 			offRight = Naive_WalkTowards(right->x, right->y, left->x, left->y);
 			int nextLines = left->y - right->y;
 
@@ -414,7 +423,7 @@ void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Verte
 	// initially make a simple fill operation
 
 	bool drawFill = true;
-	bool drawWireframe = true;
+	bool drawWireframe = false;
 
 	if (drawFill) {
 		Naive_FillVertices(renderer, vertices, indices + 3);
@@ -555,11 +564,19 @@ int main(int argc, char* argv[])
 					break;
 				}
 				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_R) {
-					renderFrame();
+					++frame;
+				}
+
+				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_Q) {
+					--frame;
 				}
 
 				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_O) {
 					useOrtho = !useOrtho;
+				}
+
+				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_P) {
+					paused = !paused;
 				}
 			}
 			else if (e.type == globalCustomEventId) {
