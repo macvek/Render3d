@@ -9,6 +9,8 @@ using namespace std;
 double SCREEN_WIDTH = 800;
 double SCREEN_HEIGHT = 600;
 
+double FOV = 90;
+
 Uint32 globalCustomEventId = 0;
  
 bool render = true;
@@ -108,13 +110,20 @@ struct M44 {
 		return DoublePoint{ nX * ratioX, nY * ratioY };
 	}
 
-	DoublePoint ProjectPerspective(DoublePoint& p, double viewWidth, double viewHeight, double F) {
+	// Screen is assumed to be a rectangle
+	double calcFocalFromFov(double screenSize, double fov) {
+		double beta = (M_PI - fov) / 2;
+		return screenSize * tan(beta) / 2;
+	}
+
+	DoublePoint ProjectPerspective(DoublePoint& p, double viewWidth, double viewHeight, double fov) {
 		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
 		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
 		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
 
+		double F = calcFocalFromFov(viewWidth, fov);
 		double focalMult = F / (F+nZ);
-
+		
 		double xPerspective = nX * focalMult;
 		double yPerspective = nY * focalMult;
 
@@ -130,13 +139,16 @@ struct Shape {
 	std::vector<DoublePoint> points;
 };
 
+double degToRad(double a) {
+	return a * M_PI / 180;
+}
 
 void shapeToProjectedVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
 	float screenOffsetX = SCREEN_WIDTH / 2;
 	float screenOffsetY = SCREEN_HEIGHT / 2;
 
 	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
-		DoublePoint projected = toApply.ProjectPerspective(*ptr, 400, 300, 200);
+		DoublePoint projected = toApply.ProjectPerspective(*ptr, 400, 300, degToRad(FOV));
 
 		SDL_Vertex each;
 		each.position.x = (float)projected.x + screenOffsetX;
@@ -557,21 +569,37 @@ int main(int argc, char* argv[])
 				if (key == SDL_SCANCODE_ESCAPE) {
 					break;
 				}
-				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_R) {
-					++frame;
+
+				if (e.type == SDL_KEYUP) {
+
+					if (key == SDL_SCANCODE_R) {
+						++frame;
+					}
+
+					if (key == SDL_SCANCODE_Q) {
+						--frame;
+					}
+
+					if (key == SDL_SCANCODE_O) {
+						useOrtho = !useOrtho;
+					}
+
+					if (key == SDL_SCANCODE_P) {
+						paused = !paused;
+					}
+
+					if (key == SDL_SCANCODE_KP_PLUS) {
+						FOV += 5;
+						cout << "FOV: " << FOV << endl;
+					}
+
+					if (key == SDL_SCANCODE_KP_MINUS) {
+						FOV -= 5;
+						cout << "FOV: " << FOV << endl;
+					}
+
 				}
 
-				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_Q) {
-					--frame;
-				}
-
-				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_O) {
-					useOrtho = !useOrtho;
-				}
-
-				if (e.type == SDL_KEYUP && key == SDL_SCANCODE_P) {
-					paused = !paused;
-				}
 			}
 			else if (e.type == globalCustomEventId) {
 				renderFrame();
