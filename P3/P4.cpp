@@ -44,6 +44,13 @@ struct M44 {
 		m[3][0] = 0; m[3][1] = 0; m[3][2] = 0; m[3][3] = 1;
 	}
 
+	void InitAsScale(double sx, double sy, double sz) {
+		m[0][0] = sx; m[0][1] = 0;  m[0][2] = 0;  m[0][3] = 0;
+		m[1][0] = 0;  m[1][1] = sy; m[1][2] = 0;  m[1][3] = 0;
+		m[2][0] = 0;  m[2][1] = 0;  m[2][2] = sz; m[2][3] = 0;
+		m[3][0] = 0;  m[3][1] = 0;  m[3][2] = 0;  m[3][3] = 1;
+	}
+
 	void InitAsRotateX(double phi) {
 		m[0][0] = 1; m[0][1] = 0;			m[0][2] = 0;		 m[0][3] = 0;
 		m[1][0] = 0; m[1][1] = cos(phi);	m[1][2] = -sin(phi); m[1][3] = 0;
@@ -70,7 +77,21 @@ struct M44 {
 		m[0][0] = 1; m[0][1] = 0; m[0][2] = 0; m[0][3] = x;
 		m[1][0] = 0; m[1][1] = 1; m[1][2] = 0; m[1][3] = y;
 		m[2][0] = 0; m[2][1] = 0; m[2][2] = 1; m[2][3] = z;
-		m[3][0] = 1; m[3][1] = 0; m[3][2] = 0; m[3][3] = 1;
+		m[3][0] = 0; m[3][1] = 0; m[3][2] = 0; m[3][3] = 1;
+	}
+
+	void InitAsOrthographic(double right, double top, double far, double near) {
+		m[0][0] = 1/right;	m[0][1] = 0;	 m[0][2] = 0;			  m[0][3] = 0;
+		m[1][0] = 0;		m[1][1] = 1/top; m[1][2] = 0;			  m[1][3] = 0;
+		m[2][0] = 0;		m[2][1] = 0;	 m[2][2] = -2/(far-near); m[2][3] = - (far + near) / (far - near);
+		m[3][0] = 0;		m[3][1] = 0;	 m[3][2] = 0;			  m[3][3] = 1;
+	}
+
+	void InitAsPerspective(double right, double top, double far, double near) {
+		m[0][0] = near/right; m[0][1] = 0;		  m[0][2] = 0;			  m[0][3] = 0;
+		m[1][0] = 0;		  m[1][1] = near/top; m[1][2] = 0;			  m[1][3] = 0;
+		m[2][0] = 0;		  m[2][1] = 0;		  m[2][2] = -(far + near) / (far - near) ; m[2][3] = -2 * far * near / (far - near);
+		m[3][0] = 0;		  m[3][1] = 0;		  m[3][2] = -1;			  m[3][3] = 0;
 	}
 
 	void FillFrom(M44& s) {
@@ -99,6 +120,22 @@ struct M44 {
 		cout << " [ " << m[3][0] << "\t" << m[3][1] << "\t" << m[3][2] << "\t" << m[3][3] << " ] " << endl;
 	}
 	
+	DoublePoint ApplyOnPoint(DoublePoint& p) {
+		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
+		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
+		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
+
+		return DoublePoint{ nX , nY, nZ };
+	}
+
+	DoublePoint Projection(DoublePoint& p) {
+		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
+		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
+		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
+		double nW = m[3][0] * p.x + m[3][1] * p.y + m[3][2] * p.z + m[3][3];
+
+		return DoublePoint{ nX/nW , nY/nW, nZ/nW };
+	}
 	
 	DoublePoint ProjectOrtho(DoublePoint& p, double viewWidth, double viewHeight) {
 		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
@@ -173,6 +210,19 @@ void shapeToOrthoVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& o
 	}
 }
 
+void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
+	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
+		DoublePoint transformed = toApply.ApplyOnPoint(*ptr);
+		
+		DoublePoint projected = toProject.Projection(transformed);
+		SDL_Vertex each;
+		each.position.x = (float)(1+projected.x) * (SCREEN_WIDTH / 2);
+		each.position.y = (float)(1+projected.y) * (SCREEN_HEIGHT / 2);
+
+		outVertices.push_back(each);
+	}
+}
+
 void renderShapeOrtho(Shape& shape, M44& toApply) {
 	std::vector<SDL_Vertex> vertices;
 	shapeToOrthoVertices(toApply, shape, vertices);
@@ -189,9 +239,25 @@ void renderShapeOrtho(Shape& shape, M44& toApply) {
 	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
 }
 
-Shape faceFront = { { {-70,-70, -50}, {70,-70, -50}, {70,70, -50}, {-70,70, -50} } };
-Shape faceMiddle = { { {-80,-80,0}, {80,-80, 0}, {80,80, 0}, {-80,80, 0} } };
-Shape faceBack = { { {-90,-90, 50}, {90,-90, 50}, {90,90, 50}, {-90,90, 50} } };
+void renderShape(Shape& shape, M44& toApply, M44& projection) {
+	std::vector<SDL_Vertex> vertices;
+	projectShapeToVertices(toApply, projection, shape, vertices);
+
+	int indices[6];
+	indices[0] = 0;
+	indices[1] = 1;
+	indices[2] = 3;
+
+	indices[3] = 1;
+	indices[4] = 2;
+	indices[5] = 3;
+
+	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
+}
+
+Shape faceFront = { { {-50,-50, 10}, {50,-50, 10}, {50,50, 10}, {-50,50, 10} } };
+Shape faceMiddle = { { {-50,-50,0}, {50,-50, 0}, {50,50, 0}, {-50,50, 0} } };
+Shape faceBack = { { {-50,-50, -10}, {50,-50, -10}, {50,50, -10}, {-50,50, -10} } };
 
 void renderShapePerspective(M44& toApply, Shape& shape) {
 	std::vector<SDL_Vertex> vertices;
@@ -221,10 +287,11 @@ void renderFrame() {
 	}
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
 
-	M44 base;
+	M44 toApply;
+	toApply.InitAsTranslate(0,0,-100);
 
 	double angleZ = (frame / 400.0)* M_PI;
-	base.InitAsRotateZ(angleZ);
+	M44 rotZ; rotZ.InitAsRotateZ(angleZ);
 
 	double angleY = angleZ / 2;
 	M44 rotY; rotY.InitAsRotateY(angleY);
@@ -232,29 +299,39 @@ void renderFrame() {
 	double angleX = angleZ / 3;
 	M44 rotX; rotX.InitAsRotateY(angleX);
 
-	base.Mult(rotX);
+	toApply.Mult(rotX);
+	toApply.Mult(rotY);
+	toApply.Mult(rotZ);
 
+
+	M44 ident;
+	ident.InitAsIdentity();
 	
-	if (useOrtho) {
-		SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
-		renderShapeOrtho(faceBack, base);
-		
-		SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
-		renderShapeOrtho(faceMiddle, base);
+	M44 projection;
 
-		SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
-		renderShapeOrtho(faceFront, base);
+
+	if (useOrtho) {
+		projection.InitAsOrthographic(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 200, 1);
 	}
 	else {
-		SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
-		renderShapePerspective(base, faceBack);
 
-		SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
-		renderShapePerspective(base, faceMiddle);
+		double aspectRatio = ((double)SCREEN_WIDTH)/SCREEN_HEIGHT;
+		double front = 1;
+		double tangent = tan(FOV / 2 * M_PI / 180);
+		double right = front * tangent;
+		double top = right / aspectRatio;
 
-		SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
-		renderShapePerspective(base, faceFront);
+		projection.InitAsPerspective(right, top, 200, 1);
 	}
+
+	SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
+	renderShape(faceBack, toApply, projection);
+
+	SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
+	renderShape(faceMiddle, toApply, projection);
+
+	SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
+	renderShape(faceFront, toApply, projection);
 
 	SDL_RenderPresent(renderer);
 	if (!paused) {
