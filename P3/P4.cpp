@@ -9,7 +9,7 @@ using namespace std;
 #define SWIDTH 800
 #define SHEIGHT 600
 
-typedef double real;
+typedef float real;
 
 const real SCREEN_WIDTH = SWIDTH;
 const real SCREEN_HEIGHT = SHEIGHT;
@@ -75,7 +75,7 @@ void resetBackBuffer() {
 	}
 	
 	memcpy(backbuffer, emptyBuffer, SWIDTH * SHEIGHT * sizeof(int));
-	memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(double));
+	memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(real));
 }
 
 
@@ -410,7 +410,6 @@ void renderFrame() {
 
 		projection.InitAsPerspective(right, top, 200, 1);
 	}
-
 	
 	renderShape(faceBack, toApply, projection, true);
 	renderShape(faceMiddle, toApply, projection, true);
@@ -429,6 +428,12 @@ void renderFrame() {
 	}
 }
 
+void rangeLambdas(BarycentricLambdas lambdas) {
+	lambdas.l1 = std::max((real)0.0, std::min((real)1.0, lambdas.l1));
+	lambdas.l2 = std::max((real)0.0, std::min((real)1.0, lambdas.l2));
+	lambdas.l3 = 1 - lambdas.l1 - lambdas.l2;
+}
+
 void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, BaryPrecalcLambdas &precalc, int leftX, int rightX, int lineY, bool useZ) {
 	BarycentricLambdas lambdas;
 	BaryLinePrecalc linePrecalc;
@@ -439,6 +444,9 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coor
 		calcLambdaForPoint(lambdas, precalc, linePrecalc, x);
 		int buffIdx = lineY * SWIDTH + x;
 		
+		if (x == leftX || x == rightX) {
+			rangeLambdas(lambdas);
+		}
 		real zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
 		if (useZ) {
 			zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
@@ -528,8 +536,8 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 			}
 		}
 
-		lX = std::min(SCREEN_WIDTH - 1, std::max(0.0, lX));
-		rX = std::min(SCREEN_WIDTH - 1, std::max(0.0, rX));
+		lX = std::min(SCREEN_WIDTH - 1, std::max((real)0.0, lX));
+		rX = std::min(SCREEN_WIDTH - 1, std::max((real)0.0, rX));
 
 		if (lX <= rX) {
 			Naive_DrawTriangleLine(renderer, coords, precalc, lX, rX, y, useZ);
