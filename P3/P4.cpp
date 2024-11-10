@@ -15,7 +15,7 @@ Uint32 globalCustomEventId = 0;
  
 bool render = true;
 bool useOrtho = false;
-bool paused = false;
+bool paused = true;
 Uint32 tickFrame(Uint32 interval, void* param) {
 	SDL_Event e = {};
 	e.type = globalCustomEventId;
@@ -223,22 +223,6 @@ void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vec
 	}
 }
 
-void renderShapeOrtho(Shape& shape, M44& toApply) {
-	std::vector<SDL_Vertex> vertices;
-	shapeToOrthoVertices(toApply, shape, vertices);
-
-	int indices[6];
-	indices[0] = 0;
-	indices[1] = 1;
-	indices[2] = 3;
-
-	indices[3] = 1;
-	indices[4] = 2;
-	indices[5] = 3;
-
-	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
-}
-
 void renderShape(Shape& shape, M44& toApply, M44& projection) {
 	std::vector<SDL_Vertex> vertices;
 	projectShapeToVertices(toApply, projection, shape, vertices);
@@ -258,22 +242,6 @@ void renderShape(Shape& shape, M44& toApply, M44& projection) {
 Shape faceFront = { { {-50,-50, 10}, {50,-50, 10}, {50,50, 10}, {-50,50, 10} } };
 Shape faceMiddle = { { {-50,-50,0}, {50,-50, 0}, {50,50, 0}, {-50,50, 0} } };
 Shape faceBack = { { {-50,-50, -10}, {50,-50, -10}, {50,50, -10}, {-50,50, -10} } };
-
-void renderShapePerspective(M44& toApply, Shape& shape) {
-	std::vector<SDL_Vertex> vertices;
-	shapeToProjectedVertices(toApply, shape, vertices);
-
-	int indices[6];
-	indices[0] = 0;
-	indices[1] = 1;
-	indices[2] = 3;
-
-	indices[3] = 1;
-	indices[4] = 2;
-	indices[5] = 3;
-
-	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
-}
 
 int frame = 0;
 
@@ -412,6 +380,63 @@ void Naive_DrawHorizLine(SDL_Renderer* renderer, int x1, int x2, int lineY) {
 	SDL_SetRenderDrawColor(renderer, r, g, b, a);
 	
 }
+
+struct BarycentricForTriangle {
+	float detT;
+	float T[2][2];
+
+	const SDL_Vertex* a;
+	const SDL_Vertex* b;
+	const SDL_Vertex* c;
+};
+
+struct BarycentricLambdas {
+	float l1;
+	float l2;
+	float l3;
+};
+
+// taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
+void setupBarycentricForTriangle(BarycentricForTriangle &coords, const SDL_Vertex* a, const SDL_Vertex* b, const SDL_Vertex* c) {
+	coords.a = a;
+	coords.b = b;
+	coords.c = c;
+	
+	auto x1 = coords.a->position.x;
+	auto x2 = coords.b->position.x;
+	auto x3 = coords.c->position.x;
+
+	auto y1 = coords.a->position.y;
+	auto y2 = coords.b->position.y;
+	auto y3 = coords.c->position.y;
+
+	coords.T[0][0] = x1 - x3;
+	coords.T[1][0] = x2 - x3;
+	coords.T[0][1] = y1 - y3;
+	coords.T[1][1] = y2 - y3;
+
+	coords.detT = coords.T[0][0] * coords.T[1][1] - coords.T[1][0] * coords.T[0][1];
+}
+
+void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, const SDL_FPoint& point) {
+	auto x1 = coords.a->position.x;
+	auto x2 = coords.b->position.x;
+	auto x3 = coords.c->position.x;
+
+	auto y1 = coords.a->position.y;
+	auto y2 = coords.b->position.y;
+	auto y3 = coords.c->position.y;
+
+	ret.l1 = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / coords.detT;
+	ret.l2 = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / coords.detT;
+	ret.l3 = 1 - ret.l1 - ret.l2;
+}
+
+void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricForTriangle& coords) {
+	ret.x = lambdas.l1 * coords.a->position.x + lambdas.l2 * coords.b->position.x + lambdas.l3 * coords.c->position.x;
+	ret.y = lambdas.l1 * coords.a->position.y + lambdas.l2 * coords.b->position.y + lambdas.l3 * coords.c->position.y;
+}
+
 
 void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
@@ -636,7 +661,38 @@ int main(int argc, char* argv[])
 	
 	renderFrame();
 	SDL_RenderPresent(renderer);
+
+	BarycentricForTriangle coords;
+	BarycentricLambdas lambdas;
+
+	SDL_Vertex a;
+	SDL_Vertex b;
+	SDL_Vertex c;
+
+	a.position = { 10,0 };
+	b.position = { 0, 10 };
+	c.position = { 20,10 };
+
+	setupBarycentricForTriangle(coords, &a, &b, &c);
 	
+	SDL_FPoint point = { 10,5 };
+	calcLambdaForPoint(lambdas, coords, point);
+	
+	SDL_FPoint outPoint;
+	calcXYForLambda(outPoint, lambdas, coords);
+	
+	cout << "CALC:" << endl;
+	cout << lambdas.l1 << endl;
+	cout << lambdas.l3 << endl;
+	cout << lambdas.l2 << endl;
+
+	cout << "CALC:" << endl;
+	cout << outPoint.x << endl;
+	cout << outPoint.y << endl;
+	
+
+	return 0;
+
 	SDL_Event e;
 	for (;;) {
 		if (SDL_WaitEvent(&e)) {
