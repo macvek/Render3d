@@ -319,7 +319,6 @@ void Naive_FlushBuffer() {
 }
 
 int frame = 0;
-
 void renderFrame() {
 	backbuffer = nullptr;
 	if (SDL_LockTexture(backTexture, nullptr, (void**)&backbuffer, &backbufferPitch)) {
@@ -328,9 +327,9 @@ void renderFrame() {
 	resetBackBuffer();
 
 	M44 toApply;
-	toApply.InitAsTranslate(0,0,-100);
+	toApply.InitAsTranslate(0, 0, -100);
 
-	double angleZ = (frame / 400.0)* M_PI;
+	double angleZ = (frame / 400.0) * M_PI;
 	M44 rotZ; rotZ.InitAsRotateZ(angleZ);
 
 	double angleY = angleZ / 2;
@@ -345,16 +344,16 @@ void renderFrame() {
 
 	M44 ident;
 	ident.InitAsIdentity();
-	
+
 	M44 projection;
 
 
 	if (useOrtho) {
-		projection.InitAsOrthographic(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 200, 1);
+		projection.InitAsOrthographic(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 200, 1);
 	}
 	else {
 
-		double aspectRatio = ((double)SCREEN_WIDTH)/SCREEN_HEIGHT;
+		double aspectRatio = ((double)SCREEN_WIDTH) / SCREEN_HEIGHT;
 		double front = 1;
 		double tangent = tan(FOV / 2 * M_PI / 180);
 		double right = front * tangent;
@@ -363,6 +362,7 @@ void renderFrame() {
 		projection.InitAsPerspective(right, top, 200, 1);
 	}
 
+	
 	renderShape(faceBack, toApply, projection, true);
 	renderShape(faceMiddle, toApply, projection, true);
 	renderShape(faceFront, toApply, projection, true);
@@ -370,6 +370,7 @@ void renderFrame() {
 	renderShape(faceBack, toApply, projection, false);
 	renderShape(faceMiddle, toApply, projection, false);
 	renderShape(faceFront, toApply, projection, false);
+	
 
 	SDL_UnlockTexture(backTexture);
 	Naive_FlushBuffer();
@@ -412,7 +413,30 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 }
 
 
-void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, int lineY, bool useZ) {
+void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, int leftX, int rightX, int lineY, bool useZ) {
+	BarycentricLambdas lambdas;
+	DoublePoint point;
+	point.y = lineY;
+	for (int x = leftX; x <= rightX; ++x) {
+		point.x = x;
+		calcLambdaForPoint(lambdas, coords, point);
+		int buffIdx = lineY * SWIDTH + x;
+		
+		double zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
+		if (useZ) {
+			zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
+		}
+		else if (zValue >= zBuffer[buffIdx]) {
+			Uint8 r = coords.a->color.r * lambdas.l1 + coords.b->color.r * lambdas.l2 + coords.c->color.r * lambdas.l3;
+			Uint8 g = coords.a->color.g * lambdas.l1 + coords.b->color.g * lambdas.l2 + coords.c->color.g * lambdas.l3;
+			Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
+
+			Naive_SetBackbufferPoint(x, lineY, r, g, b);
+		}
+	}
+}
+
+void Naive_DrawTriangleLineOld(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, int lineY, bool useZ) {
 	if (lineY < 0 || lineY >= SCREEN_HEIGHT) {
 		return;
 	}
@@ -453,7 +477,75 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coor
 	}
 }
 
+bool isBetweenPoints(int y, const DoublePoint& a, const DoublePoint& b) {
+	int aY = (int)a.y;
+	int bY = (int)b.y;
+	
+	if (aY <= bY) {
+		return y >= aY && y <= bY;
+	}
+	else {
+		return y > bY && y <= aY;
+	}
+}
+
+double pointOnLineAt(int y, const DoublePoint& a, const DoublePoint& b) {
+	int aY = (int)a.y;
+	int bY = (int)b.y;
+	
+	if (aY == bY) { // pick first option, as vertices during checks never take same place twice
+		return a.x;
+	}
+
+	return (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x;
+
+}
+
 void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices, bool useZ) {
+	BarycentricForTriangle coords;
+	
+	const Naive_Vertex *picked[3];
+
+	picked[0] = vertices + *(indices + 0);
+	picked[1] = vertices + *(indices + 1);
+	picked[2] = vertices + *(indices + 2);
+
+	setupBarycentricForTriangle(coords, picked[0], picked[1], picked[2]);
+
+	double top = SCREEN_HEIGHT - 1;
+	double bottom = 0;
+
+	for (int i = 0; i < 3; ++i) {
+		top = std::min(picked[i]->position.y, top);
+		bottom = std::max(picked[i]->position.y, bottom);
+	}
+
+	int yStart = top;
+	int yEnd = bottom;
+
+	double lX = 0; 
+	double rX = SCREEN_WIDTH - 1;
+	for (int y = yStart; y <= yEnd; ++y) {
+		lX = SCREEN_WIDTH;
+		rX = 0;
+
+		for (int leftIdx = 0; leftIdx < 3; ++leftIdx) {
+			int rightIdx = (leftIdx + 1) % 3;
+
+			if (isBetweenPoints(y, picked[leftIdx]->position, picked[rightIdx]->position)) {
+				double x = pointOnLineAt(y, picked[leftIdx]->position, picked[rightIdx]->position);
+				lX = std::min(lX, x);
+				rX = std::max(rX, x);
+			}
+		}
+
+		if (lX <= rX) {
+			Naive_DrawTriangleLine(renderer, coords, lX, rX, y, useZ);
+		}
+	}
+}
+
+void Naive_FillVerticesOld(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices, bool useZ) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
 	// good subject to optimize, but should work fine
 	int sortedIndices[3];
