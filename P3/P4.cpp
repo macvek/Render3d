@@ -103,6 +103,15 @@ struct BaryPrecalcLambdas {
 	real y3;
 
 	real oneOverDetT;
+
+	real prefixL1;
+	real prefixL2;
+};
+
+struct BaryLinePrecalc {
+	real suffixL1;
+	real suffixL2;
+	
 };
 
 struct BarycentricLambdas {
@@ -151,16 +160,26 @@ void precalcLambda(BaryPrecalcLambdas& ret, BarycentricForTriangle& coords) {
 	ret.y3MINUSy1 = y3 - y1;
 	ret.x1MINUSx3 = x1 - x3;
 
+	ret.prefixL1 = ret.y2MINUSy3 * ret.oneOverDetT;
+	ret.prefixL2 = ret.y3MINUSy1 * ret.oneOverDetT;
+
 	ret.x3 = x3;
 	ret.y3 = y3;
 }
 
-void calcLambdaForPoint(BarycentricLambdas& ret, BaryPrecalcLambdas& precalc, real x, real yMINUSy3) {
+void precalcLine(BaryLinePrecalc& ret, BaryPrecalcLambdas& precalc, real coordsY3, real y) {
+	real yMINUSy3 = y - coordsY3;
+
+	ret.suffixL1 = precalc.x3MINUSx2 * yMINUSy3 * precalc.oneOverDetT;
+	ret.suffixL2 = precalc.x1MINUSx3 * yMINUSy3 * precalc.oneOverDetT;
+}
+
+void calcLambdaForPoint(BarycentricLambdas& ret, BaryPrecalcLambdas& precalc, BaryLinePrecalc linePrecalc, real x) {
 
 	real xMINUSx3 = x - precalc.x3;
 
-	ret.l1 = (precalc.y2MINUSy3 * xMINUSx3 + precalc.x3MINUSx2 * yMINUSy3) * precalc.oneOverDetT;
-	ret.l2 = (precalc.y3MINUSy1 * xMINUSx3 + precalc.x1MINUSx3 * yMINUSy3) * precalc.oneOverDetT;
+	ret.l1 = (precalc.prefixL1 * xMINUSx3) + linePrecalc.suffixL1;
+	ret.l2 = (precalc.prefixL2 * xMINUSx3) + linePrecalc.suffixL2;
 
 	ret.l3 = 1 - ret.l1 - ret.l2;
 }
@@ -410,17 +429,14 @@ void renderFrame() {
 	}
 }
 
-
-
 void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, BaryPrecalcLambdas &precalc, int leftX, int rightX, int lineY, bool useZ) {
 	BarycentricLambdas lambdas;
+	BaryLinePrecalc linePrecalc;
 
-	DoublePoint point;
-	point.y = lineY;
-	real yMINUSy3 = point.y - precalc.y3;
+	precalcLine(linePrecalc, precalc, coords.c->position.y, lineY);
 
 	for (int x = leftX; x <= rightX; ++x) {
-		calcLambdaForPoint(lambdas, precalc, x, yMINUSy3);
+		calcLambdaForPoint(lambdas, precalc, linePrecalc, x);
 		int buffIdx = lineY * SWIDTH + x;
 		
 		real zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
@@ -497,6 +513,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 
 	real lX = 0;
 	real rX = SCREEN_WIDTH - 1;
+
 	for (int y = yStart; y <= yEnd; ++y) {
 		lX = SCREEN_WIDTH;
 		rX = 0;
