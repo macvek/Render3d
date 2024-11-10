@@ -9,10 +9,12 @@ using namespace std;
 #define SWIDTH 800
 #define SHEIGHT 600
 
-const double SCREEN_WIDTH = SWIDTH;
-const double SCREEN_HEIGHT = SHEIGHT;
+typedef double real;
 
-double FOV = 90;
+const real SCREEN_WIDTH = SWIDTH;
+const real SCREEN_HEIGHT = SHEIGHT;
+
+real FOV = 90;
 
 Uint32 globalCustomEventId = 0;
  
@@ -30,7 +32,7 @@ Uint32 tickFrame(Uint32 interval, void* param) {
 }
 
 struct DoublePoint {
-	double x, y, z;
+	real x, y, z;
 };
 
 struct Naive_Vertex
@@ -41,7 +43,7 @@ struct Naive_Vertex
 };
 
 Uint32 emptyBuffer[SWIDTH * SHEIGHT];
-double zBuffer[SWIDTH * SHEIGHT];
+real zBuffer[SWIDTH * SHEIGHT];
 
 Uint32* backbuffer;
 
@@ -83,18 +85,30 @@ void Naive_SetBackbufferPoint(int x, int y, Uint8 r, Uint8 g, Uint8 b) {
 
 
 struct BarycentricForTriangle {
-	double detT;
-	double T[2][2];
+	real detT;
+	real T[2][2];
 
 	const Naive_Vertex* a;
 	const Naive_Vertex* b;
 	const Naive_Vertex* c;
 };
 
+struct BaryPrecalcLambdas {
+	real y2MINUSy3;
+	real x3MINUSx2;
+	real y3MINUSy1;
+	real x1MINUSx3;
+
+	real x3;
+	real y3;
+
+	real oneOverDetT;
+};
+
 struct BarycentricLambdas {
-	double l1;
-	double l2;
-	double l3;
+	real l1;
+	real l2;
+	real l3;
 };
 
 
@@ -121,7 +135,9 @@ void setupBarycentricForTriangle(BarycentricForTriangle& coords, const Naive_Ver
 	coords.detT = coords.T[0][0] * coords.T[1][1] - coords.T[1][0] * coords.T[0][1];
 }
 
-void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, DoublePoint& point) {
+void precalcLambda(BaryPrecalcLambdas& ret, BarycentricForTriangle& coords) {
+	ret.oneOverDetT = 1 / coords.detT;
+	
 	auto x1 = coords.a->position.x;
 	auto x2 = coords.b->position.x;
 	auto x3 = coords.c->position.x;
@@ -130,13 +146,23 @@ void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords,
 	auto y2 = coords.b->position.y;
 	auto y3 = coords.c->position.y;
 
-	ret.l1 = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / coords.detT;
-	ret.l2 = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / coords.detT;
-	ret.l3 = 1 - ret.l1 - ret.l2;
+	ret.y2MINUSy3 = y2 - y3;
+	ret.x3MINUSx2 = x3 - x2;
+	ret.y3MINUSy1 = y3 - y1;
+	ret.x1MINUSx3 = x1 - x3;
 
-	ret.l1 = std::min(1.0, std::max(0.0, ret.l1));
-	ret.l2 = std::min(1.0, std::max(0.0, ret.l2));
-	ret.l3 = std::min(1.0, std::max(0.0, ret.l3));
+	ret.x3 = x3;
+	ret.y3 = y3;
+}
+
+void calcLambdaForPoint(BarycentricLambdas& ret, BaryPrecalcLambdas& precalc, real x, real yMINUSy3) {
+
+	real xMINUSx3 = x - precalc.x3;
+
+	ret.l1 = (precalc.y2MINUSy3 * xMINUSx3 + precalc.x3MINUSx2 * yMINUSy3) * precalc.oneOverDetT;
+	ret.l2 = (precalc.y3MINUSy1 * xMINUSx3 + precalc.x1MINUSx3 * yMINUSy3) * precalc.oneOverDetT;
+
+	ret.l3 = 1 - ret.l1 - ret.l2;
 }
 
 void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricForTriangle& coords) {
@@ -146,7 +172,7 @@ void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricFo
 
 
 struct M44 {
-	double m[4][4];
+	real m[4][4];
 
 	void InitAsIdentity() {
 		m[0][0] = 1; m[0][1] = 0; m[0][2] = 0; m[0][3] = 0;
@@ -155,21 +181,21 @@ struct M44 {
 		m[3][0] = 0; m[3][1] = 0; m[3][2] = 0; m[3][3] = 1;
 	}
 
-	void InitAsScale(double sx, double sy, double sz) {
+	void InitAsScale(real sx, real sy, real sz) {
 		m[0][0] = sx; m[0][1] = 0;  m[0][2] = 0;  m[0][3] = 0;
 		m[1][0] = 0;  m[1][1] = sy; m[1][2] = 0;  m[1][3] = 0;
 		m[2][0] = 0;  m[2][1] = 0;  m[2][2] = sz; m[2][3] = 0;
 		m[3][0] = 0;  m[3][1] = 0;  m[3][2] = 0;  m[3][3] = 1;
 	}
 
-	void InitAsRotateX(double phi) {
+	void InitAsRotateX(real phi) {
 		m[0][0] = 1; m[0][1] = 0;			m[0][2] = 0;		 m[0][3] = 0;
 		m[1][0] = 0; m[1][1] = cos(phi);	m[1][2] = -sin(phi); m[1][3] = 0;
 		m[2][0] = 0; m[2][1] = sin(phi);	m[2][2] = cos(phi);	 m[2][3] = 0;
 		m[3][0] = 0; m[3][1] = 0;			m[3][2] = 0;		 m[3][3] = 1;
 	}
 
-	void InitAsRotateY(double phi) {
+	void InitAsRotateY(real phi) {
 		m[0][0] = cos(phi);   m[0][1] = 0;			m[0][2] = sin(phi);	m[0][3] = 0;
 		m[1][0] = 0;		  m[1][1] = 1;		   	m[1][2] = 0;		m[1][3] = 0;
 		m[2][0] = -sin(phi);  m[2][1] = 0;			m[2][2] = cos(phi); m[2][3] = 0;
@@ -177,28 +203,28 @@ struct M44 {
 	}
 
 	
-	void InitAsRotateZ(double phi) {
+	void InitAsRotateZ(real phi) {
 		m[0][0] = cos(phi);   m[0][1] = -sin(phi);	m[0][2] = 0; m[0][3] = 0;
 		m[1][0] = sin(phi);	  m[1][1] = cos(phi);	m[1][2] = 0; m[1][3] = 0;
 		m[2][0] = 0;		  m[2][1] = 0;			m[2][2] = 1; m[2][3] = 0;
 		m[3][0] = 0;		  m[3][1] = 0;			m[3][2] = 0; m[3][3] = 1;
 	}
 
-	void InitAsTranslate(double x, double y, double z) {
+	void InitAsTranslate(real x, real y, real z) {
 		m[0][0] = 1; m[0][1] = 0; m[0][2] = 0; m[0][3] = x;
 		m[1][0] = 0; m[1][1] = 1; m[1][2] = 0; m[1][3] = y;
 		m[2][0] = 0; m[2][1] = 0; m[2][2] = 1; m[2][3] = z;
 		m[3][0] = 0; m[3][1] = 0; m[3][2] = 0; m[3][3] = 1;
 	}
 
-	void InitAsOrthographic(double right, double top, double far, double near) {
+	void InitAsOrthographic(real right, real top, real far, real near) {
 		m[0][0] = 1/right;	m[0][1] = 0;	 m[0][2] = 0;			  m[0][3] = 0;
 		m[1][0] = 0;		m[1][1] = 1/top; m[1][2] = 0;			  m[1][3] = 0;
 		m[2][0] = 0;		m[2][1] = 0;	 m[2][2] = -2/(far-near); m[2][3] = - (far + near) / (far - near);
 		m[3][0] = 0;		m[3][1] = 0;	 m[3][2] = 0;			  m[3][3] = 1;
 	}
 
-	void InitAsPerspective(double right, double top, double far, double near) {
+	void InitAsPerspective(real right, real top, real far, real near) {
 		m[0][0] = near/right; m[0][1] = 0;		  m[0][2] = 0;			  m[0][3] = 0;
 		m[1][0] = 0;		  m[1][1] = near/top; m[1][2] = 0;			  m[1][3] = 0;
 		m[2][0] = 0;		  m[2][1] = 0;		  m[2][2] = -(far + near) / (far - near) ; m[2][3] = -2 * far * near / (far - near);
@@ -232,18 +258,18 @@ struct M44 {
 	}
 	
 	DoublePoint ApplyOnPoint(DoublePoint& p) {
-		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
-		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
-		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
+		real nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
+		real nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
+		real nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
 
 		return DoublePoint{ nX , nY, nZ };
 	}
 
 	DoublePoint Projection(DoublePoint& p) {
-		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
-		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
-		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
-		double nW = m[3][0] * p.x + m[3][1] * p.y + m[3][2] * p.z + m[3][3];
+		real nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
+		real nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
+		real nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
+		real nW = m[3][0] * p.x + m[3][1] * p.y + m[3][2] * p.z + m[3][3];
 
 		return DoublePoint{ nX/nW , nY/nW, nZ/nW };
 	}
@@ -254,7 +280,7 @@ struct Shape {
 	std::vector<DoublePoint> points;
 };
 
-double degToRad(double a) {
+real degToRad(real a) {
 	return a * M_PI / 180;
 }
 
@@ -333,13 +359,13 @@ void renderFrame() {
 	M44 toApply;
 	toApply.InitAsTranslate(0, 0, -100);
 
-	double angleZ = (frame / 400.0) * M_PI;
+	real angleZ = (frame / 400.0) * M_PI;
 	M44 rotZ; rotZ.InitAsRotateZ(angleZ);
 
-	double angleY = angleZ / 2;
+	real angleY = angleZ / 2;
 	M44 rotY; rotY.InitAsRotateY(angleY);
 
-	double angleX = angleZ / 3;
+	real angleX = angleZ / 3;
 	M44 rotX; rotX.InitAsRotateY(angleX);
 
 	toApply.Mult(rotX);
@@ -357,11 +383,11 @@ void renderFrame() {
 	}
 	else {
 
-		double aspectRatio = ((double)SCREEN_WIDTH) / SCREEN_HEIGHT;
-		double front = 1;
-		double tangent = tan(FOV / 2 * M_PI / 180);
-		double right = front * tangent;
-		double top = right / aspectRatio;
+		real aspectRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
+		real front = 1;
+		real tangent = tan(FOV / 2 * M_PI / 180);
+		real right = front * tangent;
+		real top = right / aspectRatio;
 
 		projection.InitAsPerspective(right, top, 200, 1);
 	}
@@ -375,7 +401,6 @@ void renderFrame() {
 	renderShape(faceMiddle, toApply, projection, false);
 	renderShape(faceFront, toApply, projection, false);
 	
-
 	SDL_UnlockTexture(backTexture);
 	Naive_FlushBuffer();
 	SDL_RenderPresent(renderer);
@@ -387,16 +412,18 @@ void renderFrame() {
 
 
 
-void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, int leftX, int rightX, int lineY, bool useZ) {
+void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, BaryPrecalcLambdas &precalc, int leftX, int rightX, int lineY, bool useZ) {
 	BarycentricLambdas lambdas;
+
 	DoublePoint point;
 	point.y = lineY;
+	real yMINUSy3 = point.y - precalc.y3;
+
 	for (int x = leftX; x <= rightX; ++x) {
-		point.x = x;
-		calcLambdaForPoint(lambdas, coords, point);
+		calcLambdaForPoint(lambdas, precalc, x, yMINUSy3);
 		int buffIdx = lineY * SWIDTH + x;
 		
-		double zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
+		real zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
 		if (useZ) {
 			zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
 		}
@@ -446,7 +473,8 @@ double pointOnLineAt(int y, const DoublePoint& a, const DoublePoint& b) {
 
 void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices, bool useZ) {
 	BarycentricForTriangle coords;
-	
+	BaryPrecalcLambdas precalc;
+
 	const Naive_Vertex *picked[3];
 
 	picked[0] = vertices + *(indices + 0);
@@ -454,9 +482,10 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 	picked[2] = vertices + *(indices + 2);
 
 	setupBarycentricForTriangle(coords, picked[0], picked[1], picked[2]);
+	precalcLambda(precalc, coords);
 
-	double top = SCREEN_HEIGHT - 1;
-	double bottom = 0;
+	real top = SCREEN_HEIGHT - 1;
+	real bottom = 0;
 
 	for (int i = 0; i < 3; ++i) {
 		top = std::min(picked[i]->position.y, top);
@@ -466,8 +495,8 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 	int yStart = std::max((int)top,0);
 	int yEnd = std::min((int)bottom, SHEIGHT-1);
 
-	double lX = 0; 
-	double rX = SCREEN_WIDTH - 1;
+	real lX = 0;
+	real rX = SCREEN_WIDTH - 1;
 	for (int y = yStart; y <= yEnd; ++y) {
 		lX = SCREEN_WIDTH;
 		rX = 0;
@@ -476,7 +505,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 			int rightIdx = (leftIdx + 1) % 3;
 
 			if (isBetweenPoints(y, picked[leftIdx]->position, picked[rightIdx]->position)) {
-				double x = pointOnLineAt(y, picked[leftIdx]->position, picked[rightIdx]->position);
+				real x = pointOnLineAt(y, picked[leftIdx]->position, picked[rightIdx]->position);
 				lX = std::min(lX, x);
 				rX = std::max(rX, x);
 			}
@@ -486,7 +515,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 		rX = std::min(SCREEN_WIDTH - 1, std::max(0.0, rX));
 
 		if (lX <= rX) {
-			Naive_DrawTriangleLine(renderer, coords, lX, rX, y, useZ);
+			Naive_DrawTriangleLine(renderer, coords, precalc, lX, rX, y, useZ);
 		}
 	}
 }
