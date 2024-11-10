@@ -428,10 +428,12 @@ void renderFrame() {
 	}
 }
 
-void rangeLambdas(BarycentricLambdas lambdas) {
-	lambdas.l1 = std::max((real)0.0, std::min((real)1.0, lambdas.l1));
-	lambdas.l2 = std::max((real)0.0, std::min((real)1.0, lambdas.l2));
-	lambdas.l3 = 1 - lambdas.l1 - lambdas.l2;
+void rangeLambdas(BarycentricLambdas &lambdas) {
+	BarycentricLambdas old = lambdas;
+	
+	lambdas.l1 = std::max((real)0.0, std::min((real)1.0, old.l1));
+	lambdas.l2 = std::max((real)0.0, std::min((real)1.0, old.l2));
+	lambdas.l3 = std::max((real)0.0, std::min((real)1.0, old.l3));
 }
 
 void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, BaryPrecalcLambdas &precalc, int leftX, int rightX, int lineY, bool useZ) {
