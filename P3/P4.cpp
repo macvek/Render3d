@@ -29,24 +29,41 @@ Uint32 tickFrame(Uint32 interval, void* param) {
 	return interval;
 }
 
+struct DoublePoint {
+	double x, y, z;
+};
+
 struct Naive_Vertex
 {
-	SDL_FPoint position;
+	DoublePoint position;
 	SDL_Color  color;
 	SDL_FPoint tex_coord;
 };
 
+Uint32 emptyBuffer[SWIDTH * SHEIGHT];
+double zBuffer[SWIDTH * SHEIGHT];
 
 Uint32* backbuffer;
+
+
 int backbufferPitch;
 SDL_Texture* backTexture = nullptr;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices);
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices, bool useZ);
 
 Uint32 COLOR(Uint8 r, Uint8 g, Uint8 b) {
 	return 0xFF << 24 | b << 16 | g << 8 | r;
+}
+
+void initEmptyBuffer() {
+	Uint32 fill = COLOR(255, 255, 255);
+	for (int y = 0; y < SHEIGHT; ++y) {
+		for (int x = 0; x < SWIDTH; ++x) {
+			emptyBuffer[y * SWIDTH + x] = fill;
+		}
+	}
 }
 
 void resetBackBuffer() {
@@ -55,21 +72,15 @@ void resetBackBuffer() {
 		return;
 	}
 	
-	Uint32 fill = COLOR(255, 255, 255);
-	for (int y = 0; y < SHEIGHT; ++y) {
-		for (int x = 0; x < SWIDTH; ++x) {
-			backbuffer[y * SWIDTH + x] = fill;
-		}
-	}
+	memcpy(backbuffer, emptyBuffer, SWIDTH * SHEIGHT * sizeof(int));
+	memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(double));
 }
+
 
 void Naive_SetBackbufferPoint(int x, int y, Uint8 r, Uint8 g, Uint8 b) {
 	backbuffer[y * SWIDTH + x] = COLOR(r,g,b);
 }
 
-struct DoublePoint {
-	double x, y, z;
-};
 
 struct BarycentricForTriangle {
 	float detT;
@@ -110,7 +121,7 @@ void setupBarycentricForTriangle(BarycentricForTriangle& coords, const Naive_Ver
 	coords.detT = coords.T[0][0] * coords.T[1][1] - coords.T[1][0] * coords.T[0][1];
 }
 
-void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, const SDL_FPoint& point) {
+void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, DoublePoint& point) {
 	auto x1 = coords.a->position.x;
 	auto x2 = coords.b->position.x;
 	auto x3 = coords.c->position.x;
@@ -232,39 +243,6 @@ struct M44 {
 
 		return DoublePoint{ nX/nW , nY/nW, nZ/nW };
 	}
-	
-	DoublePoint ProjectOrtho(DoublePoint& p, double viewWidth, double viewHeight) {
-		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
-		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
-
-		double ratioX = SCREEN_WIDTH / viewWidth;
-		double ratioY = SCREEN_HEIGHT / viewHeight;
-
-		return DoublePoint{ nX * ratioX, nY * ratioY };
-	}
-
-	// Screen is assumed to be a rectangle
-	double calcFocalFromFov(double screenSize, double fov) {
-		double beta = (M_PI - fov) / 2;
-		return screenSize * tan(beta) / 2;
-	}
-
-	DoublePoint ProjectPerspective(DoublePoint& p, double viewWidth, double viewHeight, double fov) {
-		double nX = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3];
-		double nY = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3];
-		double nZ = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3];
-
-		double F = calcFocalFromFov(viewWidth, fov);
-		double focalMult = F / (F+nZ);
-		
-		double xPerspective = nX * focalMult;
-		double yPerspective = nY * focalMult;
-
-		double ratioX = SCREEN_WIDTH / viewWidth;
-		double ratioY = SCREEN_HEIGHT / viewHeight;
-
-		return DoublePoint{ xPerspective * ratioX, yPerspective * ratioY };
-	}
 
 };
 
@@ -287,17 +265,17 @@ void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vec
 		
 		DoublePoint projected = toProject.Projection(transformed);
 		Naive_Vertex each;
-		each.position.x = (float)(1+projected.x) * (SCREEN_WIDTH / 2);
-		each.position.y = (float)(1+projected.y) * (SCREEN_HEIGHT / 2);
+		each.position.x = (1+projected.x) * (SCREEN_WIDTH / 2);
+		each.position.y = (1+projected.y) * (SCREEN_HEIGHT / 2);
+		each.position.z = 1 - projected.z;
 		each.color = colors[colorPtr % 3];
-		//each.color = { (Uint8)(projected.z * 255), (Uint8)(projected.z * 255), (Uint8)(projected.z * 255), 255 };
 		++colorPtr;
 
 		outVertices.push_back(each);
 	}
 }
 
-void renderShape(Shape& shape, M44& toApply, M44& projection) {
+void renderShape(Shape& shape, M44& toApply, M44& projection, bool useZ) {
 	std::vector<Naive_Vertex> vertices;
 	projectShapeToVertices(toApply, projection, shape, vertices);
 
@@ -310,7 +288,7 @@ void renderShape(Shape& shape, M44& toApply, M44& projection) {
 	indices[4] = 2;
 	indices[5] = 3;
 
-	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6);
+	Naive_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), indices, 6, useZ);
 }
 
 Shape faceFront = { { {-50,-50, 10}, {50,-50, 10}, {50,50, 10}, {-50,50, 10} } };
@@ -385,9 +363,13 @@ void renderFrame() {
 		projection.InitAsPerspective(right, top, 200, 1);
 	}
 
-	renderShape(faceBack, toApply, projection);
-	renderShape(faceMiddle, toApply, projection);
-	renderShape(faceFront, toApply, projection);
+	renderShape(faceBack, toApply, projection, true);
+	renderShape(faceMiddle, toApply, projection, true);
+	renderShape(faceFront, toApply, projection, true);
+
+	renderShape(faceBack, toApply, projection, false);
+	renderShape(faceMiddle, toApply, projection, false);
+	renderShape(faceFront, toApply, projection, false);
 
 	SDL_UnlockTexture(backTexture);
 	Naive_FlushBuffer();
@@ -430,16 +412,16 @@ float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
 }
 
 
-void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, float lineY) {
+void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, int lineY, bool useZ) {
+	if (lineY < 0 || lineY >= SCREEN_HEIGHT) {
+		return;
+	}
+	
 	// x1 and x2 are NOT expected that x1 < x2
 	if (x1 > x2) {
 		auto t = x1;
 		x1 = x2;
 		x2 = t;
-	}
-
-	if (lineY < 0 || lineY > SCREEN_HEIGHT) {
-		return;
 	}
 
 	if (x1 < 0) {
@@ -451,19 +433,27 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coor
 	}
 
 	BarycentricLambdas lambdas;
-	SDL_FPoint point;
+	DoublePoint point;
 	point.y = lineY;
-	for (float i = x1; i <= x2; ++i) {
+	for (int i = x1; i <= x2; ++i) {
 		point.x = i;
 		calcLambdaForPoint(lambdas, coords, point);
-		Uint8 r = coords.a->color.r * lambdas.l1 + coords.b->color.r * lambdas.l2 + coords.c->color.r * lambdas.l3;
-		Uint8 g = coords.a->color.g * lambdas.l1 + coords.b->color.g * lambdas.l2 + coords.c->color.g * lambdas.l3;
-		Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
-		Naive_SetBackbufferPoint(i, lineY, r, g, b);
+		int buffIdx = lineY * SWIDTH + i;
+		double zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
+		if (useZ) {
+			zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
+		}
+		else if (zValue >= zBuffer[buffIdx]) {
+			Uint8 r = coords.a->color.r * lambdas.l1 + coords.b->color.r * lambdas.l2 + coords.c->color.r * lambdas.l3;
+			Uint8 g = coords.a->color.g * lambdas.l1 + coords.b->color.g * lambdas.l2 + coords.c->color.g * lambdas.l3;
+			Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
+
+			Naive_SetBackbufferPoint(i, lineY, r, g, b);
+		}
 	}
 }
 
-void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices) {
+void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices, bool useZ) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
 	// good subject to optimize, but should work fine
 	int sortedIndices[3];
@@ -481,15 +471,14 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 	const Naive_Vertex* b = vertices + *(sortedIndices + 1);
 	const Naive_Vertex* c = vertices + *(sortedIndices + 2);
 
-	const SDL_FPoint* left;
-	const SDL_FPoint* right;
-	const SDL_FPoint* middle;
+	const DoublePoint* left;
+	const DoublePoint* right;
+	const DoublePoint* middle;
 	
 	BarycentricForTriangle coords;
 
 	setupBarycentricForTriangle(coords, rawA, rawB, rawC);
 	
-
 	int lines;
 	if (a->position.y == b->position.y) { // skip top triangle, setup walkers towards bottom point
 		lines = c->position.y - a->position.y;
@@ -504,7 +493,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 		// check for reaching bottom line
 		
 		for (int i = 0; i < lines; ++i) {
-			Naive_DrawTriangleLine(renderer, coords, left->x + i*offLeft, right->x + i * offRight, left->y + i);
+			Naive_DrawTriangleLine(renderer, coords, left->x + i*offLeft, right->x + i * offRight, left->y + i, useZ);
 		}
 	}
 	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
@@ -529,7 +518,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 			double rightX = round(middle->x + i * offRight);
 			int lineY = middle->y + i;
 
-			Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
+			Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
 		}
 
 		if (left->y < right->y) {
@@ -542,7 +531,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 				double rightX = middle->x + (lines+i) * offRight;
 				double lineY = left->y + i;
 				
-				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
+				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
 			}
 		}
 		else if (left->y > right->y) {
@@ -554,15 +543,15 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 				double rightX = right->x + i * offRight;
 				double lineY = right->y + i;
 
-				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
+				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
 			}
 		}
 	}
 }
 
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
-	Naive_FillVertices(renderer, vertices, indices + 3);
-	Naive_FillVertices(renderer, vertices, indices);
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices, bool useZ) {
+	Naive_FillVertices(renderer, vertices, indices + 3, useZ);
+	Naive_FillVertices(renderer, vertices, indices, useZ);
 }
 
 int main(int argc, char* argv[])
@@ -578,7 +567,7 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	int registeredTimer = SDL_AddTimer(25, tickFrame, nullptr);
+	int registeredTimer = SDL_AddTimer(35, tickFrame, nullptr);
 	window = SDL_CreateWindow("3d preview", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, (int)SCREEN_WIDTH, (int)SCREEN_HEIGHT, 0);
 
 	if (nullptr == window) {
@@ -593,6 +582,7 @@ int main(int argc, char* argv[])
 	}
 
 	backTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, SWIDTH, SHEIGHT);
+	initEmptyBuffer();
 	renderFrame();
 	SDL_RenderPresent(renderer);
 
