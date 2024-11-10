@@ -29,13 +29,21 @@ Uint32 tickFrame(Uint32 interval, void* param) {
 	return interval;
 }
 
+struct Naive_Vertex
+{
+	SDL_FPoint position;
+	SDL_Color  color;
+	SDL_FPoint tex_coord;
+};
+
+
 Uint32* backbuffer;
 int backbufferPitch;
 SDL_Texture* backTexture = nullptr;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices);
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices);
 
 Uint32 COLOR(Uint8 r, Uint8 g, Uint8 b) {
 	return 0xFF << 24 | b << 16 | g << 8 | r;
@@ -67,9 +75,9 @@ struct BarycentricForTriangle {
 	float detT;
 	float T[2][2];
 
-	const SDL_Vertex* a;
-	const SDL_Vertex* b;
-	const SDL_Vertex* c;
+	const Naive_Vertex* a;
+	const Naive_Vertex* b;
+	const Naive_Vertex* c;
 };
 
 struct BarycentricLambdas {
@@ -81,7 +89,7 @@ struct BarycentricLambdas {
 
 
 // taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
-void setupBarycentricForTriangle(BarycentricForTriangle& coords, const SDL_Vertex* a, const SDL_Vertex* b, const SDL_Vertex* c) {
+void setupBarycentricForTriangle(BarycentricForTriangle& coords, const Naive_Vertex* a, const Naive_Vertex* b, const Naive_Vertex* c) {
 	coords.a = a;
 	coords.b = b;
 	coords.c = c;
@@ -268,37 +276,7 @@ double degToRad(double a) {
 	return a * M_PI / 180;
 }
 
-void shapeToProjectedVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
-	float screenOffsetX = SCREEN_WIDTH / 2;
-	float screenOffsetY = SCREEN_HEIGHT / 2;
-
-	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
-		DoublePoint projected = toApply.ProjectPerspective(*ptr, 400, 300, degToRad(FOV));
-
-		SDL_Vertex each;
-		each.position.x = (float)projected.x + screenOffsetX;
-		each.position.y = (float)projected.y + screenOffsetY;
-
-		outVertices.push_back(each);
-	}
-}
-
-void shapeToOrthoVertices(M44& toApply, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
-	float screenOffsetX = SCREEN_WIDTH / 2;
-	float screenOffsetY = SCREEN_HEIGHT / 2;
-	
-	for (auto ptr = shape.points.begin(); ptr < shape.points.end(); ++ptr) {
-		DoublePoint projected = toApply.ProjectOrtho(*ptr, 400, 300);
-
-		SDL_Vertex each;
-		each.position.x = (float)projected.x + screenOffsetX;
-		each.position.y = (float)projected.y + screenOffsetY;
-
-		outVertices.push_back(each);
-	}
-}
-
-void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vector<SDL_Vertex>& outVertices) {
+void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vector<Naive_Vertex>& outVertices) {
 	SDL_Color colors[3] = {
 		{255,0,0, 255}, {0,255,0, 255}, {0,0,255, 255}
 	};
@@ -308,10 +286,11 @@ void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vec
 		DoublePoint transformed = toApply.ApplyOnPoint(*ptr);
 		
 		DoublePoint projected = toProject.Projection(transformed);
-		SDL_Vertex each;
+		Naive_Vertex each;
 		each.position.x = (float)(1+projected.x) * (SCREEN_WIDTH / 2);
 		each.position.y = (float)(1+projected.y) * (SCREEN_HEIGHT / 2);
 		each.color = colors[colorPtr % 3];
+		//each.color = { (Uint8)(projected.z * 255), (Uint8)(projected.z * 255), (Uint8)(projected.z * 255), 255 };
 		++colorPtr;
 
 		outVertices.push_back(each);
@@ -319,7 +298,7 @@ void projectShapeToVertices(M44& toApply, M44& toProject, Shape& shape, std::vec
 }
 
 void renderShape(Shape& shape, M44& toApply, M44& projection) {
-	std::vector<SDL_Vertex> vertices;
+	std::vector<Naive_Vertex> vertices;
 	projectShapeToVertices(toApply, projection, shape, vertices);
 
 	int indices[6];
@@ -386,7 +365,6 @@ void renderFrame() {
 	toApply.Mult(rotY);
 	toApply.Mult(rotZ);
 
-
 	M44 ident;
 	ident.InitAsIdentity();
 	
@@ -420,8 +398,8 @@ void renderFrame() {
 	}
 }
 
-void Naive_SortVertices(const SDL_Vertex* triangle, const int *indices, int* outIndices) {
-	const SDL_Vertex* t = triangle;
+void Naive_SortVertices(const Naive_Vertex* triangle, const int *indices, int* outIndices) {
+	const Naive_Vertex* t = triangle;
 	
 	int a = *(indices + 0);
 	int b = *(indices + 1);
@@ -471,7 +449,6 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coor
 	if (x2 > SCREEN_WIDTH) {
 		x2 = SCREEN_WIDTH;
 	}
-	Uint8 r, g, b, a;
 
 	BarycentricLambdas lambdas;
 	SDL_FPoint point;
@@ -484,12 +461,9 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coor
 		Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
 		Naive_SetBackbufferPoint(i, lineY, r, g, b);
 	}
-
 }
 
-
-
-void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
+void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices) {
 	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
 	// good subject to optimize, but should work fine
 	int sortedIndices[3];
@@ -499,13 +473,13 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 
 	Naive_SortVertices(vertices, indices, sortedIndices);
 
-	const SDL_Vertex* rawA = vertices + *(indices + 0);
-	const SDL_Vertex* rawB = vertices + *(indices + 1);
-	const SDL_Vertex* rawC = vertices + *(indices + 2);
+	const Naive_Vertex* rawA = vertices + *(indices + 0);
+	const Naive_Vertex* rawB = vertices + *(indices + 1);
+	const Naive_Vertex* rawC = vertices + *(indices + 2);
 
-	const SDL_Vertex* a = vertices + *(sortedIndices + 0);
-	const SDL_Vertex* b = vertices + *(sortedIndices + 1);
-	const SDL_Vertex* c = vertices + *(sortedIndices + 2);
+	const Naive_Vertex* a = vertices + *(sortedIndices + 0);
+	const Naive_Vertex* b = vertices + *(sortedIndices + 1);
+	const Naive_Vertex* c = vertices + *(sortedIndices + 2);
 
 	const SDL_FPoint* left;
 	const SDL_FPoint* right;
@@ -586,7 +560,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 	}
 }
 
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
+void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
 	Naive_FillVertices(renderer, vertices, indices + 3);
 	Naive_FillVertices(renderer, vertices, indices);
 }
@@ -603,7 +577,6 @@ int main(int argc, char* argv[])
 		cout << "Failed to get registered event.." << endl;
 		return -1;
 	}
-
 
 	int registeredTimer = SDL_AddTimer(25, tickFrame, nullptr);
 	window = SDL_CreateWindow("3d preview", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, (int)SCREEN_WIDTH, (int)SCREEN_HEIGHT, 0);
@@ -623,34 +596,6 @@ int main(int argc, char* argv[])
 	renderFrame();
 	SDL_RenderPresent(renderer);
 
-	BarycentricForTriangle coords;
-	BarycentricLambdas lambdas;
-
-	SDL_Vertex a;
-	SDL_Vertex b;
-	SDL_Vertex c;
-
-	a.position = { 10,0 };
-	b.position = { 0, 10 };
-	c.position = { 20,10 };
-
-	setupBarycentricForTriangle(coords, &a, &b, &c);
-	
-	SDL_FPoint point = { 10,5 };
-	calcLambdaForPoint(lambdas, coords, point);
-	
-	SDL_FPoint outPoint;
-	calcXYForLambda(outPoint, lambdas, coords);
-	
-	cout << "CALC:" << endl;
-	cout << lambdas.l1 << endl;
-	cout << lambdas.l3 << endl;
-	cout << lambdas.l2 << endl;
-
-	cout << "CALC:" << endl;
-	cout << outPoint.x << endl;
-	cout << outPoint.y << endl;
-	
 	SDL_Event e;
 	for (;;) {
 		if (SDL_WaitEvent(&e)) {
