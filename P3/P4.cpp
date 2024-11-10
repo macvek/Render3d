@@ -6,8 +6,11 @@
 
 using namespace std;
 
-double SCREEN_WIDTH = 800;
-double SCREEN_HEIGHT = 600;
+#define SWIDTH 800
+#define SHEIGHT 600
+
+const double SCREEN_WIDTH = SWIDTH;
+const double SCREEN_HEIGHT = SHEIGHT;
 
 double FOV = 90;
 
@@ -26,9 +29,35 @@ Uint32 tickFrame(Uint32 interval, void* param) {
 	return interval;
 }
 
+Uint32* backbuffer;
+int backbufferPitch;
+SDL_Texture* backTexture = nullptr;
+
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices);
+
+Uint32 COLOR(Uint8 r, Uint8 g, Uint8 b) {
+	return 0xFF << 24 | b << 16 | g << 8 | r;
+}
+
+void resetBackBuffer() {
+	if (backbuffer == nullptr) {
+		cout << "Expected to have non-null backbuffer" << endl;
+		return;
+	}
+	
+	Uint32 fill = COLOR(255, 255, 255);
+	for (int y = 0; y < SHEIGHT; ++y) {
+		for (int x = 0; x < SWIDTH; ++x) {
+			backbuffer[y * SWIDTH + x] = fill;
+		}
+	}
+}
+
+void Naive_SetBackbufferPoint(int x, int y, Uint8 r, Uint8 g, Uint8 b) {
+	backbuffer[y * SWIDTH + x] = COLOR(r,g,b);
+}
 
 struct DoublePoint {
 	double x, y, z;
@@ -309,17 +338,37 @@ Shape faceFront = { { {-50,-50, 10}, {50,-50, 10}, {50,50, 10}, {-50,50, 10} } }
 Shape faceMiddle = { { {-50,-50,0}, {50,-50, 0}, {50,50, 0}, {-50,50, 0} } };
 Shape faceBack = { { {-50,-50, -10}, {50,-50, -10}, {50,50, -10}, {-50,50, -10} } };
 
+void Naive_FlushBuffer() {
+	SDL_Vertex vertices[4];
+	int indices[6] = { 0, 1, 2, 1, 2, 3 };
+
+	vertices[0].color = { 255,255,255,255 };
+	vertices[0].position = { 0,0 };
+	vertices[0].tex_coord = { 0.0, 0.0 };
+
+	vertices[1].color = { 255,255,255,255 };
+	vertices[1].position = { SWIDTH ,0 };
+	vertices[1].tex_coord = { 1.0, 0.0 };
+
+	vertices[2].color = { 255,255,255,255 };
+	vertices[2].position = { 0, SHEIGHT };
+	vertices[2].tex_coord = { 0.0, 1.0 };
+
+	vertices[3].color = { 255,255,255,255 };
+	vertices[3].position = { SWIDTH, SHEIGHT };
+	vertices[3].tex_coord = { 1.0, 1.0 };
+
+	SDL_RenderGeometry(renderer,backTexture, vertices, 4, indices, 6);
+}
+
 int frame = 0;
 
 void renderFrame() {
-	if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE)) {
-		cout << "SDL_SetRenderDrawColor: " << SDL_GetError() << endl;
+	backbuffer = nullptr;
+	if (SDL_LockTexture(backTexture, nullptr, (void**)&backbuffer, &backbufferPitch)) {
+		cout << "SDL_LockTexture: " << SDL_GetError() << endl;
 	}
-
-	if (SDL_RenderClear(renderer)) {
-		cout << "SDL_RenderClear: " << SDL_GetError() << endl;
-	}
-	SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	resetBackBuffer();
 
 	M44 toApply;
 	toApply.InitAsTranslate(0,0,-100);
@@ -358,15 +407,12 @@ void renderFrame() {
 		projection.InitAsPerspective(right, top, 200, 1);
 	}
 
-	SDL_SetRenderDrawColor(renderer, 255, 64, 64, SDL_ALPHA_OPAQUE);
 	renderShape(faceBack, toApply, projection);
-
-	SDL_SetRenderDrawColor(renderer, 64, 255, 64, SDL_ALPHA_OPAQUE);
 	renderShape(faceMiddle, toApply, projection);
-
-	SDL_SetRenderDrawColor(renderer, 64, 64, 255, SDL_ALPHA_OPAQUE);
 	renderShape(faceFront, toApply, projection);
 
+	SDL_UnlockTexture(backTexture);
+	Naive_FlushBuffer();
 	SDL_RenderPresent(renderer);
 	if (!paused) {
 		++frame;
@@ -436,9 +482,7 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coor
 		Uint8 r = coords.a->color.r * lambdas.l1 + coords.b->color.r * lambdas.l2 + coords.c->color.r * lambdas.l3;
 		Uint8 g = coords.a->color.g * lambdas.l1 + coords.b->color.g * lambdas.l2 + coords.c->color.g * lambdas.l3;
 		Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
-		SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-		
-		SDL_RenderDrawPoint(renderer, i, lineY);
+		Naive_SetBackbufferPoint(i, lineY, r, g, b);
 	}
 
 }
@@ -468,7 +512,6 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 	const SDL_FPoint* middle;
 	
 	BarycentricForTriangle coords;
-	BarycentricLambdas lambdas;
 
 	setupBarycentricForTriangle(coords, rawA, rawB, rawC);
 	
@@ -544,30 +587,8 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 }
 
 void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const SDL_Vertex* vertices, int num_vertices, const int* indices, int num_indices) {
-	// initially make a simple fill operation
-
-	bool drawFill = true;
-	bool drawWireframe = false;
-
-	if (drawFill) {
-		Naive_FillVertices(renderer, vertices, indices + 3);
-		Naive_FillVertices(renderer, vertices, indices);
-	}
-
-	if (drawWireframe) {
-		SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-		for (int t = 0; t < num_indices; t += 3) {
-			for (int i = 0; i < 3; ++i) {
-				int idxFrom = indices[i + t];
-				int idxTo = indices[(i + 1) % 3 + t];
-
-				const SDL_Vertex* fromV = vertices + idxFrom;
-				const SDL_Vertex* toV = vertices + idxTo;
-
-				SDL_RenderDrawLine(renderer, (int)fromV->position.x, (int)fromV->position.y, (int)toV->position.x, (int)toV->position.y);
-			}
-		}
-	}
+	Naive_FillVertices(renderer, vertices, indices + 3);
+	Naive_FillVertices(renderer, vertices, indices);
 }
 
 int main(int argc, char* argv[])
@@ -598,83 +619,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	const int tx = 100;
-	const int ty = 100;
-
-	auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tx, ty);
-	if (nullptr == renderer) {
-		cout << "Texture failed: " << SDL_GetError() << endl;
-		return 1;
-	}
-	
-	unsigned char pixels[tx * ty * 4] = {};
-	int cnt = 0;
-	for (int y=0;y<ty;y++) {
-		for (int x = 0; x < tx; ++x) {
-			int xy = 4 * (y * tx + x);
-			
-			pixels[xy + 0] = (cnt % 3) == 0 ? 255 : 0;
-			pixels[xy + 1] = (cnt % 3) == 1 ? 255 : 0;
-			pixels[xy + 2] = (cnt % 3) == 2 ? 255 : 0;
-			pixels[xy + 3] = 255;
-			++cnt;
-		}
-	}
-
-
-	if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE)) {
-		cout << "SDL_SetRenderDrawColor: " << SDL_GetError() << endl;
-	}
-
-	if (SDL_RenderClear(renderer)) {
-		cout << "SDL_RenderClear: " << SDL_GetError() << endl;
-	}
-	SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-	SDL_UpdateTexture(texture, nullptr, pixels, tx * 4);
-	
-	SDL_Vertex vertices[6];
-	float aX = 50;
-	float aY = 100;
-
-	float w = 200;
-	float h = 200;
-
-	vertices[0].color = { 255,255,255,255 };
-	vertices[0].position = { aX,aY };
-	vertices[0].tex_coord = { 0.0, 0.0 };
-	
-	vertices[1].color = { 255,255,255,255 };
-	vertices[1].position = { aX+w,aY};
-	vertices[1].tex_coord = { 1.0, 0.0 };
-	
-	vertices[2].color = { 255,255,255,255 };
-	vertices[2].position = { aX,aY+h+100};
-	vertices[2].tex_coord = { 0.0, 1.0 };
-
-	vertices[3].color = { 255,255,255,255 };
-	vertices[3].position = { aX+w,aY+h};
-	vertices[3].tex_coord = { 1.0, 1.0 };
-
-	int indices[6] = { 0,1,2, 1,2,3 };
-
-	int renderStatus = SDL_RenderGeometry(renderer,
-		texture,
-		vertices, 4,
-		indices, 6);
-
-	for (int i = 0; i < 4; ++i) {
-		vertices[i].position.x += 350;
-	}
-	SDL_SetRenderDrawColor(renderer, 255, 0, 0, SDL_ALPHA_OPAQUE);
-	Naive_RenderGeometry(renderer,
-		texture,
-		vertices, 4,
-		indices, 6);
-	
-
-	cout << "Rendered: " << renderStatus << SDL_GetError() << endl;
-
-	
+	backTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, SWIDTH, SHEIGHT);
 	renderFrame();
 	SDL_RenderPresent(renderer);
 
