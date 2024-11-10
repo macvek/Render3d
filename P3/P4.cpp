@@ -83,8 +83,8 @@ void Naive_SetBackbufferPoint(int x, int y, Uint8 r, Uint8 g, Uint8 b) {
 
 
 struct BarycentricForTriangle {
-	float detT;
-	float T[2][2];
+	double detT;
+	double T[2][2];
 
 	const Naive_Vertex* a;
 	const Naive_Vertex* b;
@@ -92,9 +92,9 @@ struct BarycentricForTriangle {
 };
 
 struct BarycentricLambdas {
-	float l1;
-	float l2;
-	float l3;
+	double l1;
+	double l2;
+	double l3;
 };
 
 
@@ -133,6 +133,10 @@ void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords,
 	ret.l1 = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / coords.detT;
 	ret.l2 = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / coords.detT;
 	ret.l3 = 1 - ret.l1 - ret.l2;
+
+	ret.l1 = std::min(1.0, std::max(0.0, ret.l1));
+	ret.l2 = std::min(1.0, std::max(0.0, ret.l2));
+	ret.l3 = std::min(1.0, std::max(0.0, ret.l3));
 }
 
 void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricForTriangle& coords) {
@@ -381,36 +385,6 @@ void renderFrame() {
 	}
 }
 
-void Naive_SortVertices(const Naive_Vertex* triangle, const int *indices, int* outIndices) {
-	const Naive_Vertex* t = triangle;
-	
-	int a = *(indices + 0);
-	int b = *(indices + 1);
-	int c = *(indices + 2);
-
-	int tmp;
-	int list[3] = { a,b,c };
-	if (t[a].position.y > t[b].position.y) { tmp = a; a = b; b = tmp; } // a<=>b
-	if (t[a].position.y > t[c].position.y) { tmp = a; a = c; c = tmp; } // a<=>c
-	if (t[b].position.y > t[c].position.y) { tmp = b; b = c; c = tmp; } // b<=>c
-
-	if (t[a].position.y == t[b].position.y) { 
-		// triangle with top horizontal line ; sort on X only top line and exit
-		if (t[a].position.x > t[b].position.x) { tmp = a; a = b; b = tmp; } // a<=>b;
-	}
-	else {
-		// single top vertex ; order other 2 on X;
-		if (t[b].position.x > t[c].position.x) { tmp = b; b = c; c = tmp; } // b<=>c;
-	}
-
-	outIndices[0] = a;
-	outIndices[1] = b;
-	outIndices[2] = c;
-}
-
-float Naive_WalkTowards(float fromX, float fromY, float toX, float toY) {
-	return (toX - fromX) / (toY - fromY);
-}
 
 
 void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coords, int leftX, int rightX, int lineY, bool useZ) {
@@ -436,47 +410,6 @@ void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle& coor
 	}
 }
 
-void Naive_DrawTriangleLineOld(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, int lineY, bool useZ) {
-	if (lineY < 0 || lineY >= SCREEN_HEIGHT) {
-		return;
-	}
-	
-	// x1 and x2 are NOT expected that x1 < x2
-	if (x1 > x2) {
-		auto t = x1;
-		x1 = x2;
-		x2 = t;
-	}
-
-	if (x1 < 0) {
-		x1 = 0;
-	}
-
-	if (x2 > SCREEN_WIDTH) {
-		x2 = SCREEN_WIDTH;
-	}
-
-	BarycentricLambdas lambdas;
-	DoublePoint point;
-	point.y = lineY;
-	for (int i = x1; i <= x2; ++i) {
-		point.x = i;
-		calcLambdaForPoint(lambdas, coords, point);
-		int buffIdx = lineY * SWIDTH + i;
-		double zValue = coords.a->position.z * lambdas.l1 + coords.b->position.z * lambdas.l2 + coords.c->position.z * lambdas.l3;
-		if (useZ) {
-			zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
-		}
-		else if (zValue >= zBuffer[buffIdx]) {
-			Uint8 r = coords.a->color.r * lambdas.l1 + coords.b->color.r * lambdas.l2 + coords.c->color.r * lambdas.l3;
-			Uint8 g = coords.a->color.g * lambdas.l1 + coords.b->color.g * lambdas.l2 + coords.c->color.g * lambdas.l3;
-			Uint8 b = coords.a->color.b * lambdas.l1 + coords.b->color.b * lambdas.l2 + coords.c->color.b * lambdas.l3;
-
-			Naive_SetBackbufferPoint(i, lineY, r, g, b);
-		}
-	}
-}
-
 bool isBetweenPoints(int y, const DoublePoint& a, const DoublePoint& b) {
 	int aY = (int)a.y;
 	int bY = (int)b.y;
@@ -489,12 +422,22 @@ bool isBetweenPoints(int y, const DoublePoint& a, const DoublePoint& b) {
 	}
 }
 
+// here we already checked that point lays on the line of (a,b)
 double pointOnLineAt(int y, const DoublePoint& a, const DoublePoint& b) {
 	int aY = (int)a.y;
 	int bY = (int)b.y;
 	
 	if (aY == bY) { // pick first option, as vertices during checks never take same place twice
 		return a.x;
+	}
+
+	// cases of hitting corner
+	if (aY == y) {
+		return a.x;
+	}
+
+	if (bY == y) {
+		return b.x;
 	}
 
 	return (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x;
@@ -520,8 +463,8 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 		bottom = std::max(picked[i]->position.y, bottom);
 	}
 
-	int yStart = top;
-	int yEnd = bottom;
+	int yStart = std::max((int)top,0);
+	int yEnd = std::min((int)bottom, SHEIGHT-1);
 
 	double lX = 0; 
 	double rX = SCREEN_WIDTH - 1;
@@ -539,107 +482,16 @@ void Naive_FillVertices(SDL_Renderer* renderer, const Naive_Vertex* vertices, co
 			}
 		}
 
+		lX = std::min(SCREEN_WIDTH - 1, std::max(0.0, lX));
+		rX = std::min(SCREEN_WIDTH - 1, std::max(0.0, rX));
+
 		if (lX <= rX) {
 			Naive_DrawTriangleLine(renderer, coords, lX, rX, y, useZ);
 		}
 	}
 }
 
-void Naive_FillVerticesOld(SDL_Renderer* renderer, const Naive_Vertex* vertices, const int* indices, bool useZ) {
-	// TOTALLY NOT OPTIMIZED - has 2 loops while 2nd is doing partially what first does, but works; also it does way too much calculations; and uses too many variables; 
-	// good subject to optimize, but should work fine
-	int sortedIndices[3];
 
-	float offLeft;
-	float offRight;
-
-	Naive_SortVertices(vertices, indices, sortedIndices);
-
-	const Naive_Vertex* rawA = vertices + *(indices + 0);
-	const Naive_Vertex* rawB = vertices + *(indices + 1);
-	const Naive_Vertex* rawC = vertices + *(indices + 2);
-
-	const Naive_Vertex* a = vertices + *(sortedIndices + 0);
-	const Naive_Vertex* b = vertices + *(sortedIndices + 1);
-	const Naive_Vertex* c = vertices + *(sortedIndices + 2);
-
-	const DoublePoint* left;
-	const DoublePoint* right;
-	const DoublePoint* middle;
-	
-	BarycentricForTriangle coords;
-
-	setupBarycentricForTriangle(coords, rawA, rawB, rawC);
-	
-	int lines;
-	if (a->position.y == b->position.y) { // skip top triangle, setup walkers towards bottom point
-		lines = c->position.y - a->position.y;
-
-		left = &a->position;
-		right = &b->position;
-		middle = &c->position;
-		
-		offLeft = Naive_WalkTowards(left->x, left->y, middle->x, middle->y);
-		offRight = Naive_WalkTowards(right->x, right->y, middle->x, middle->y);
-		
-		// check for reaching bottom line
-		
-		for (int i = 0; i < lines; ++i) {
-			Naive_DrawTriangleLine(renderer, coords, left->x + i*offLeft, right->x + i * offRight, left->y + i, useZ);
-		}
-	}
-	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
-
-		middle = &a->position;
-		left = &b->position;
-		right = &c->position;
-
-		if (left->y < right->y) {
-			lines = left->y - middle->y;
-		}
-		else {
-			lines = right->y - middle->y;
-		}
-		
-		offLeft = Naive_WalkTowards(middle->x, middle->y, left->x, left->y);
-		offRight = Naive_WalkTowards(middle->x, middle->y, right->x, right->y);
-
-		// draw towards horizontal line
-		for (int i = 0; i < lines+1; ++i) {
-			double leftX = round(middle->x + i * offLeft);
-			double rightX = round(middle->x + i * offRight);
-			int lineY = middle->y + i;
-
-			Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
-		}
-
-		if (left->y < right->y) {
-			offLeft = Naive_WalkTowards(left->x, left->y, right->x, right->y);
-
-			int nextLines = right->y - left->y;
-
-			for (int i = 0; i < nextLines+1; ++i) {
-				double leftX = left->x + i * offLeft;
-				double rightX = middle->x + (lines+i) * offRight;
-				double lineY = left->y + i;
-				
-				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
-			}
-		}
-		else if (left->y > right->y) {
-			offRight = Naive_WalkTowards(right->x, right->y, left->x, left->y);
-			int nextLines = left->y - right->y;
-
-			for (int i = 0; i < nextLines + 1; ++i) {
-				double leftX = middle->x + (lines + i) * offLeft;
-				double rightX = right->x + i * offRight;
-				double lineY = right->y + i;
-
-				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY, useZ);
-			}
-		}
-	}
-}
 
 void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture* , const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices, bool useZ) {
 	Naive_FillVertices(renderer, vertices, indices + 3, useZ);
