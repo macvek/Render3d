@@ -34,6 +34,65 @@ struct DoublePoint {
 	double x, y, z;
 };
 
+struct BarycentricForTriangle {
+	float detT;
+	float T[2][2];
+
+	const SDL_Vertex* a;
+	const SDL_Vertex* b;
+	const SDL_Vertex* c;
+};
+
+struct BarycentricLambdas {
+	float l1;
+	float l2;
+	float l3;
+};
+
+
+
+// taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
+void setupBarycentricForTriangle(BarycentricForTriangle& coords, const SDL_Vertex* a, const SDL_Vertex* b, const SDL_Vertex* c) {
+	coords.a = a;
+	coords.b = b;
+	coords.c = c;
+
+	auto x1 = coords.a->position.x;
+	auto x2 = coords.b->position.x;
+	auto x3 = coords.c->position.x;
+
+	auto y1 = coords.a->position.y;
+	auto y2 = coords.b->position.y;
+	auto y3 = coords.c->position.y;
+
+	coords.T[0][0] = x1 - x3;
+	coords.T[1][0] = x2 - x3;
+	coords.T[0][1] = y1 - y3;
+	coords.T[1][1] = y2 - y3;
+
+	coords.detT = coords.T[0][0] * coords.T[1][1] - coords.T[1][0] * coords.T[0][1];
+}
+
+void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, const SDL_FPoint& point) {
+	auto x1 = coords.a->position.x;
+	auto x2 = coords.b->position.x;
+	auto x3 = coords.c->position.x;
+
+	auto y1 = coords.a->position.y;
+	auto y2 = coords.b->position.y;
+	auto y3 = coords.c->position.y;
+
+	ret.l1 = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / coords.detT;
+	ret.l2 = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / coords.detT;
+	ret.l3 = 1 - ret.l1 - ret.l2;
+}
+
+void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricForTriangle& coords) {
+	ret.x = lambdas.l1 * coords.a->position.x + lambdas.l2 * coords.b->position.x + lambdas.l3 * coords.c->position.x;
+	ret.y = lambdas.l1 * coords.a->position.y + lambdas.l2 * coords.b->position.y + lambdas.l3 * coords.c->position.y;
+}
+
+
 struct M44 {
 	double m[4][4];
 
@@ -381,61 +440,44 @@ void Naive_DrawHorizLine(SDL_Renderer* renderer, int x1, int x2, int lineY) {
 	
 }
 
-struct BarycentricForTriangle {
-	float detT;
-	float T[2][2];
 
-	const SDL_Vertex* a;
-	const SDL_Vertex* b;
-	const SDL_Vertex* c;
-};
+void Naive_DrawTriangleLine(SDL_Renderer* renderer, BarycentricForTriangle &coords, float x1, float x2, float lineY) {
+	// x1 and x2 are NOT expected that x1 < x2
+	if (x1 > x2) {
+		auto t = x1;
+		x1 = x2;
+		x2 = t;
+	}
 
-struct BarycentricLambdas {
-	float l1;
-	float l2;
-	float l3;
-};
+	if (lineY < 0 || lineY > SCREEN_HEIGHT) {
+		return;
+	}
 
-// taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
-void setupBarycentricForTriangle(BarycentricForTriangle &coords, const SDL_Vertex* a, const SDL_Vertex* b, const SDL_Vertex* c) {
-	coords.a = a;
-	coords.b = b;
-	coords.c = c;
-	
-	auto x1 = coords.a->position.x;
-	auto x2 = coords.b->position.x;
-	auto x3 = coords.c->position.x;
+	if (x1 < 0) {
+		x1 = 0;
+	}
 
-	auto y1 = coords.a->position.y;
-	auto y2 = coords.b->position.y;
-	auto y3 = coords.c->position.y;
+	if (x2 > SCREEN_WIDTH) {
+		x2 = SCREEN_WIDTH;
+	}
+	Uint8 r, g, b, a;
 
-	coords.T[0][0] = x1 - x3;
-	coords.T[1][0] = x2 - x3;
-	coords.T[0][1] = y1 - y3;
-	coords.T[1][1] = y2 - y3;
+	BarycentricLambdas lambdas;
+	SDL_FPoint point;
+	point.y = lineY;
+	for (float i = x1; i <= x2; ++i) {
+		point.x = i;
+		calcLambdaForPoint(lambdas, coords, point);
+		Uint8 r = 255 * lambdas.l1;
+		Uint8 g = 255 * lambdas.l2;
+		Uint8 b = 255 * lambdas.l3;
+		SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
+		
+		SDL_RenderDrawPoint(renderer, i, lineY);
+	}
 
-	coords.detT = coords.T[0][0] * coords.T[1][1] - coords.T[1][0] * coords.T[0][1];
 }
 
-void calcLambdaForPoint(BarycentricLambdas& ret, BarycentricForTriangle& coords, const SDL_FPoint& point) {
-	auto x1 = coords.a->position.x;
-	auto x2 = coords.b->position.x;
-	auto x3 = coords.c->position.x;
-
-	auto y1 = coords.a->position.y;
-	auto y2 = coords.b->position.y;
-	auto y3 = coords.c->position.y;
-
-	ret.l1 = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / coords.detT;
-	ret.l2 = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / coords.detT;
-	ret.l3 = 1 - ret.l1 - ret.l2;
-}
-
-void calcXYForLambda(SDL_FPoint& ret, BarycentricLambdas& lambdas, BarycentricForTriangle& coords) {
-	ret.x = lambdas.l1 * coords.a->position.x + lambdas.l2 * coords.b->position.x + lambdas.l3 * coords.c->position.x;
-	ret.y = lambdas.l1 * coords.a->position.y + lambdas.l2 * coords.b->position.y + lambdas.l3 * coords.c->position.y;
-}
 
 
 void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, const int* indices) {
@@ -456,6 +498,12 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 	const SDL_FPoint* right;
 	const SDL_FPoint* middle;
 	
+	BarycentricForTriangle coords;
+	BarycentricLambdas lambdas;
+
+	setupBarycentricForTriangle(coords, a, b, c);
+	
+
 	int lines;
 	if (a->position.y == b->position.y) { // skip top triangle, setup walkers towards bottom point
 		lines = c->position.y - a->position.y;
@@ -470,7 +518,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 		// check for reaching bottom line
 		
 		for (int i = 0; i < lines; ++i) {
-			Naive_DrawHorizLine(renderer, round(left->x + i*offLeft), round(right->x + i * offRight), left->y + i);
+			Naive_DrawTriangleLine(renderer, coords, left->x + i*offLeft, right->x + i * offRight, left->y + i);
 		}
 	}
 	else {	// has top triangle, with A on top; and B/C (on left and right, but unknown which is higher)
@@ -495,7 +543,7 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			double rightX = round(middle->x + i * offRight);
 			int lineY = middle->y + i;
 
-			Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
+			Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
 		}
 
 		if (left->y < right->y) {
@@ -504,12 +552,11 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			int nextLines = right->y - left->y;
 
 			for (int i = 0; i < nextLines+1; ++i) {
-				double leftX = round(left->x + i * offLeft);
-				double rightX = round(middle->x + (lines+i) * offRight);
-				int lineY = left->y + i;
+				double leftX = left->x + i * offLeft;
+				double rightX = middle->x + (lines+i) * offRight;
+				double lineY = left->y + i;
 				
-
-				Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
+				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
 			}
 		}
 		else if (left->y > right->y) {
@@ -517,11 +564,11 @@ void Naive_FillVertices(SDL_Renderer* renderer, const SDL_Vertex* vertices, cons
 			int nextLines = left->y - right->y;
 
 			for (int i = 0; i < nextLines + 1; ++i) {
-				int leftX = (int)(middle->x + (lines + i) * offLeft); 
-				int rightX = (int)(right->x + i * offRight);
-				int lineY = right->y + i;
+				double leftX = middle->x + (lines + i) * offLeft;
+				double rightX = right->x + i * offRight;
+				double lineY = right->y + i;
 
-				Naive_DrawHorizLine(renderer, leftX, rightX, lineY);
+				Naive_DrawTriangleLine(renderer, coords, leftX, rightX, lineY);
 			}
 		}
 	}
@@ -690,9 +737,6 @@ int main(int argc, char* argv[])
 	cout << outPoint.x << endl;
 	cout << outPoint.y << endl;
 	
-
-	return 0;
-
 	SDL_Event e;
 	for (;;) {
 		if (SDL_WaitEvent(&e)) {
