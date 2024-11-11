@@ -239,8 +239,16 @@ struct PipelineTriangle { // indices pointing to pipeline->vertices in pipeline
 	int indices[3];
 
 	BaryPrecalcLambdas precalc;
-
 	LineCache lines;
+	real zIndex; 
+
+	void calcZIndex(const std::vector<Naive_Vertex>& vertices) {
+		const Naive_Vertex& a = vertices[indices[0]];
+		const Naive_Vertex& b = vertices[indices[1]];
+		const Naive_Vertex& c = vertices[indices[2]];
+
+
+	}
 
 	// taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
 	void calcBarycentric(const std::vector<Naive_Vertex> &vertices) {
@@ -414,6 +422,7 @@ struct Pipeline {
 	void precalculateTriangles() {
 		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
 			ptr->calcBarycentric(vertices);
+			ptr->calcZIndex(vertices);
 			ptr->calcLines(vertices);
 		}
 	}
@@ -495,9 +504,6 @@ SDL_Texture* backTexture = nullptr;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
-void Naive_RenderGeometry(SDL_Renderer* renderer, SDL_Texture*, const Naive_Vertex* vertices, int num_vertices, const int* indices, int num_indices, bool useZ);
-
-
 
 void initEmptyBuffer() {
 	Uint32 fill = COLOR(255, 255, 255);
@@ -517,9 +523,6 @@ void resetBackBuffer() {
 	memcpy(backbuffer, emptyBuffer, SWIDTH * SHEIGHT * sizeof(int));
 	memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(real));
 }
-
-
-
 
 // taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
 void setupBarycentricForTriangle(BarycentricForTriangle& coords, const Naive_Vertex* a, const Naive_Vertex* b, const Naive_Vertex* c) {
@@ -566,9 +569,9 @@ void precalcLambda(BaryPrecalcLambdas& ret, BarycentricForTriangle& coords) {
 	ret.y3 = y3;
 }
 
-Shape faceFront = { { {-50,-50, 10}, {50,-50, 10}, {50,50, 10}, {-50,50, 10} } };
-Shape faceMiddle = { { {-50,-50,0}, {50,-50, 0}, {50,50, 0}, {-50,50, 0} } };
-Shape faceBack = { { {-50,-50, -10}, {50,-50, -10}, {50,50, -10}, {-50,50, -10} } };
+Shape generateFaceAt(real c) {
+	return { { {-50,-50, c}, {50,-50, c}, {50,50, c}, {-50,50, c} } };
+}
 
 void Naive_FlushBuffer() {
 	SDL_Vertex vertices[4];
@@ -594,6 +597,9 @@ void Naive_FlushBuffer() {
 }
 
 int frame = 0;
+
+std::vector<Shape> allShapes;
+
 void renderFrame() {
 	backbuffer = nullptr;
 	if (SDL_LockTexture(backTexture, nullptr, (void**)&backbuffer, &backbufferPitch)) {
@@ -603,7 +609,7 @@ void renderFrame() {
 
 	Pipeline p{};
 	// TODO: worldTransform can be understood as camera; to rethink how to efficiently place items dynamically before reaching this point
-	p.worldTransform.InitAsTranslate(0, 0, -100);
+	p.worldTransform.InitAsTranslate(0, 0, -50);
 
 	real angleZ = (frame / 400.0) * M_PI;
 	M44 rotZ{}; rotZ.InitAsRotateZ(angleZ);
@@ -623,18 +629,18 @@ void renderFrame() {
 	}
 	else {
 		real aspectRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
-		real front = 1;
+		real front = 100;
 		real tangent = tan(FOV / 2 * M_PI / 180);
 		real right = front * tangent;
 		real top = right / aspectRatio;
 
-		p.projection.InitAsPerspective(right, top, 200, 1);
+		p.projection.InitAsPerspective(right, top, 100, 10);
 	}
 
-	p.putShape(faceFront);
-	p.putShape(faceBack);
-	p.putShape(faceMiddle);
-
+	for (auto ptr = allShapes.begin(); ptr < allShapes.end(); ++ptr) {
+		p.putShape(*ptr);
+	}
+	
 	p.applyWorldTransformation();
 	p.applyProjection();
 	p.applyToScreen();
@@ -653,6 +659,10 @@ void renderFrame() {
 
 int main(int argc, char* argv[])
 {
+	for (int i = -1; i < 2; ++i) {
+		allShapes.push_back(generateFaceAt(i*10));
+	}
+
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		cout << "Error initializing SDL: " << SDL_GetError() << endl;
 		return 1;
