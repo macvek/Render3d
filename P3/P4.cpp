@@ -14,14 +14,14 @@ typedef float real;
 const real SCREEN_WIDTH = SWIDTH;
 const real SCREEN_HEIGHT = SHEIGHT;
 
-real FOV = 90;
+real FOV = 60;
 
 Uint32 globalCustomEventId = 0;
  
 bool render = true;
 bool useOrtho = false;
 bool paused = false;
-
+bool enableZTest = true;
 
 struct TriangleLambdas {
 	real l1;
@@ -428,6 +428,10 @@ struct Pipeline {
 	}
 
 	void renderZBuffer() {
+		if (!enableZTest) {
+			return;
+		}
+
 		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
 			Naive_Vertex& a = vertices[ptr->indices[0]];
 			Naive_Vertex& b = vertices[ptr->indices[1]];
@@ -484,7 +488,7 @@ struct Pipeline {
 					}
 					real zValue = a.position.z * lambdas.l1 + b.position.z * lambdas.l2 + c.position.z * lambdas.l3;
 					
-					if (zValue >= zBuffer[buffIdx]) {
+					if (!enableZTest || zValue >= zBuffer[buffIdx]) {
 						Uint8 cR = (Uint8)(a.color.r * lambdas.l1 + b.color.r * lambdas.l2 + c.color.r * lambdas.l3);
 						Uint8 cG = (Uint8)(a.color.g * lambdas.l1 + b.color.g * lambdas.l2 + c.color.g * lambdas.l3);
 						Uint8 cB = (Uint8)(a.color.b * lambdas.l1 + b.color.b * lambdas.l2 + c.color.b * lambdas.l3);
@@ -521,7 +525,9 @@ void resetBackBuffer() {
 	}
 	
 	memcpy(backbuffer, emptyBuffer, SWIDTH * SHEIGHT * sizeof(int));
-	memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(real));
+	if (enableZTest) {
+		memset(zBuffer, 0, SWIDTH * SHEIGHT * sizeof(real));
+	}
 }
 
 // taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
@@ -609,7 +615,7 @@ void renderFrame() {
 
 	Pipeline p{};
 	// TODO: worldTransform can be understood as camera; to rethink how to efficiently place items dynamically before reaching this point
-	p.worldTransform.InitAsTranslate(0, 0, -50);
+	p.worldTransform.InitAsTranslate(0, 0, -100);
 
 	real angleZ = (frame / 400.0) * M_PI;
 	M44 rotZ{}; rotZ.InitAsRotateZ(angleZ);
@@ -622,19 +628,22 @@ void renderFrame() {
 
 	p.worldTransform.Mult(rotX);
 	p.worldTransform.Mult(rotY);
-	p.worldTransform.Mult(rotZ);
+	//p.worldTransform.Mult(rotZ);
+
+	double far = 150;
+	double near = 10;
 
 	if (useOrtho) {
-		p.projection.InitAsOrthographic(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 200, 1);
+		p.projection.InitAsOrthographic(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, far, near);
 	}
 	else {
 		real aspectRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
-		real front = 100;
+		real front = 30;
 		real tangent = tan(FOV / 2 * M_PI / 180);
 		real right = front * tangent;
 		real top = right / aspectRatio;
 
-		p.projection.InitAsPerspective(right, top, 100, 10);
+		p.projection.InitAsPerspective(right, top, far, near);
 	}
 
 	for (auto ptr = allShapes.begin(); ptr < allShapes.end(); ++ptr) {
@@ -659,9 +668,10 @@ void renderFrame() {
 
 int main(int argc, char* argv[])
 {
-	for (int i = -1; i < 2; ++i) {
-		allShapes.push_back(generateFaceAt(i*10));
+	for (int i = -10; i <= 20; i+=10) {
+		allShapes.push_back(generateFaceAt(i));
 	}
+
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		cout << "Error initializing SDL: " << SDL_GetError() << endl;
