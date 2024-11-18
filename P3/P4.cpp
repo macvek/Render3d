@@ -14,7 +14,7 @@ typedef float real;
 const real SCREEN_WIDTH = SWIDTH;
 const real SCREEN_HEIGHT = SHEIGHT;
 
-real FOV = 60;
+real FOV = 90;
 
 Uint32 globalCustomEventId = 0;
  
@@ -459,7 +459,9 @@ struct Pipeline {
 						rangeLambdas(lambdas);
 					}
 					real zValue = a.position.z * lambdas.l1 + b.position.z * lambdas.l2 + c.position.z * lambdas.l3;
-					zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
+					if (zValue > 0 && zValue < 1) {
+						zBuffer[buffIdx] = std::max(zValue, zBuffer[buffIdx]);
+					}
 				}
 			}
 		}
@@ -491,7 +493,7 @@ struct Pipeline {
 					}
 					real zValue = a.position.z * lambdas.l1 + b.position.z * lambdas.l2 + c.position.z * lambdas.l3;
 
-					if (!enableZTest || zValue >= zBuffer[buffIdx]) {
+					if (!enableZTest || ( zValue >= zBuffer[buffIdx] && zValue < 1)) {
 						Uint8 cR = (Uint8)(a.color.r * lambdas.l1 + b.color.r * lambdas.l2 + c.color.r * lambdas.l3);
 						Uint8 cG = (Uint8)(a.color.g * lambdas.l1 + b.color.g * lambdas.l2 + c.color.g * lambdas.l3);
 						Uint8 cB = (Uint8)(a.color.b * lambdas.l1 + b.color.b * lambdas.l2 + c.color.b * lambdas.l3);
@@ -644,17 +646,16 @@ void renderFrame() {
 	p.worldTransform.Mult(rotY);
 	//p.worldTransform.Mult(rotZ);
 
-	double far = 120;
-	double near = 10;
+	double far = 900;
+	double near = 40;
 
 	if (useOrtho) {
 		p.projection.InitAsOrthographic(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, far, near);
 	}
 	else {
 		real aspectRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
-		real front = 30;
 		real tangent = tan(FOV / 2 * M_PI / 180);
-		real right = front * tangent;
+		real right = near * tangent;
 		real top = right / aspectRatio;
 
 		p.projection.InitAsPerspective(right, top, far, near);
