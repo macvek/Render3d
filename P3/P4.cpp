@@ -22,6 +22,7 @@ bool render = true;
 bool useOrtho = false;
 bool paused = false;
 bool enableZTest = true;
+bool showZBuffer = false;
 
 struct TriangleLambdas {
 	real l1;
@@ -448,7 +449,7 @@ struct Pipeline {
 
 				for (int x = leftX; x <= rightX; ++x) {
 					int buffIdx = lineY * SWIDTH + x;
-					
+
 					TriangleLambdas lambdas;
 					calcLambdaForPoint(lambdas, ptr->precalc, linePrecalc, x);
 
@@ -473,21 +474,21 @@ struct Pipeline {
 				auto& pair = ptr->lines.ranges[i];
 				int leftX = pair.first;
 				int rightX = pair.second;
-				
+
 				BaryLinePrecalc linePrecalc;
 				precalcLine(linePrecalc, ptr->precalc, c.position.y, lineY);
-				
+
 				for (int x = leftX; x <= rightX; ++x) {
 					int buffIdx = lineY * SWIDTH + x;
 
 					TriangleLambdas lambdas;
 					calcLambdaForPoint(lambdas, ptr->precalc, linePrecalc, x);
-					
+
 					if (x == leftX || x == rightX) {
 						rangeLambdas(lambdas);
 					}
 					real zValue = a.position.z * lambdas.l1 + b.position.z * lambdas.l2 + c.position.z * lambdas.l3;
-					
+
 					if (!enableZTest || zValue >= zBuffer[buffIdx]) {
 						Uint8 cR = (Uint8)(a.color.r * lambdas.l1 + b.color.r * lambdas.l2 + c.color.r * lambdas.l3);
 						Uint8 cG = (Uint8)(a.color.g * lambdas.l1 + b.color.g * lambdas.l2 + c.color.g * lambdas.l3);
@@ -498,6 +499,17 @@ struct Pipeline {
 				}
 			}
 		}
+	}
+
+	void renderBackbufferFromZ() {
+		for (int x = 0; x < SWIDTH; ++x) {
+			for (int y = 0; y < SHEIGHT; ++y) {
+				int buffIdx = y * SWIDTH + x;
+				real v = zBuffer[buffIdx];
+				Naive_SetBackbufferPoint(x, y, v*256, v * 256, v * 256);
+			}
+		}
+		
 	}
 
 };
@@ -649,13 +661,18 @@ void renderFrame() {
 	for (auto ptr = allShapes.begin(); ptr < allShapes.end(); ++ptr) {
 		p.putShape(*ptr);
 	}
-	
+
 	p.applyWorldTransformation();
 	p.applyProjection();
 	p.applyToScreen();
 	p.precalculateTriangles();
 	p.renderZBuffer();
-	p.renderBackbuffer();
+	if (showZBuffer) {
+		p.renderBackbufferFromZ();
+	}
+	else {
+		p.renderBackbuffer();
+	}
 
 	SDL_UnlockTexture(backTexture);
 	Naive_FlushBuffer();
@@ -729,6 +746,10 @@ int main(int argc, char* argv[])
 
 					if (key == SDL_SCANCODE_P) {
 						paused = !paused;
+					}
+
+					if (key == SDL_SCANCODE_Z) {
+						showZBuffer = !showZBuffer;
 					}
 
 					if (key == SDL_SCANCODE_KP_PLUS) {
