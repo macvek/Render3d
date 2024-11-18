@@ -2,6 +2,7 @@
 #include <cmath>
 #include <SDL.h>
 #include <vector>
+#include <algorithm>
 #include <cstdlib>
 
 using namespace std;
@@ -50,11 +51,19 @@ struct RealPoint {
 	real x, y, z;
 };
 
+enum CoordSystem {
+	WORLD = 0,
+	CAMERA,
+	PROJECTED,
+	SCREEN
+};
+
 struct Naive_Vertex
 {
 	RealPoint position;
 	SDL_Color  color;
 	SDL_FPoint tex_coord;
+	CoordSystem coordSystem;
 };
 
 struct M44 {
@@ -236,13 +245,15 @@ struct LineCache {
 	std::vector<std::pair<int, int>> ranges;
 };
 
+
 struct PipelineTriangle { // indices pointing to pipeline->vertices in pipeline
 	int indices[3];
-
+	bool onScreen;
 	BaryPrecalcLambdas precalc;
 	LineCache lines;
-	real zIndex; 
+	real zIndex;
 
+	// this stage is calculated in normalized (0;1), where lower is closer to camera
 	void calcZIndex(const std::vector<Naive_Vertex>& vertices) {
 		const Naive_Vertex& a = vertices[indices[0]];
 		const Naive_Vertex& b = vertices[indices[1]];
@@ -250,7 +261,24 @@ struct PipelineTriangle { // indices pointing to pipeline->vertices in pipeline
 
 		zIndex = std::max<real>(a.position.z, b.position.z);
 		zIndex = std::max<real>(zIndex, c.position.z);
+	}
 
+	// this stage is calculated in normalized (-1;1) space
+	void calcOnScreen(const std::vector<Naive_Vertex>& vertices) {
+		const Naive_Vertex& a = vertices[indices[0]];
+		const Naive_Vertex& b = vertices[indices[1]];
+		const Naive_Vertex& c = vertices[indices[2]];
+
+		onScreen = !(
+			(a.position.x < -1 && b.position.x < -1 && c.position.x < -1) || // all to the left
+			(a.position.x > 1 && b.position.x > 1 && c.position.x > 1) || // all to the right
+
+			(a.position.y < -1 && b.position.y < -1 && c.position.y < -1) || // all over the top
+			(a.position.y > 1 && b.position.y > 1 && c.position.y > 1) || // all below the bottom
+
+			(a.position.z < 0 && b.position.z < 0 && c.position.z < 0) || // all behind near limit
+			(a.position.z > 1 && b.position.z > 1 && c.position.z > 1)  // all behind far limit
+		);
 	}
 
 	// taken from https://en.wikipedia.org/wiki/Barycentric_coordinate_system
@@ -335,7 +363,6 @@ struct PipelineTriangle { // indices pointing to pipeline->vertices in pipeline
 	}
 };
 
-
 void precalcLine(BaryLinePrecalc& ret, BaryPrecalcLambdas& precalc, real coordsY3, int y) {
 	real yMINUSy3 = y - coordsY3;
 
@@ -374,7 +401,7 @@ struct Pipeline {
 	M44 projection;
 	std::vector<Naive_Vertex> vertices;
 	std::vector<PipelineTriangle> triangles;
-
+	
 	void putShape(const Shape& s) {
 		// temporary coloring //
 		SDL_Color colors[3] = {
@@ -405,37 +432,61 @@ struct Pipeline {
 	void applyWorldTransformation() {
 		for (auto ptr = vertices.begin(); ptr < vertices.end(); ++ptr) {
 			ptr->position = worldTransform.ApplyOnPoint(ptr->position);
+			ptr->coordSystem = CAMERA;
 		}
 	}
 
 	void applyProjection() {
 		for (auto ptr = vertices.begin(); ptr < vertices.end(); ++ptr) {
 			ptr->position = projection.Projection(ptr->position);
+			ptr->coordSystem = PROJECTED;
+		}
+	}
+
+	void applyClipping() {
+		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
+			ptr->calcOnScreen(vertices);
+			if (ptr->onScreen) {
+				ptr->calcZIndex(vertices);
+			}
 		}
 	}
 
 	void applyToScreen() {
-		for (auto ptr = vertices.begin(); ptr < vertices.end(); ++ptr) {
-			ptr->position.x = (1 + ptr->position.x) * (SCREEN_WIDTH / 2);
-			ptr->position.y = (1 + ptr->position.y) * (SCREEN_HEIGHT / 2);
-			ptr->position.z = 1 - ptr->position.z;
+		for (auto ptr = triangles.begin(); ptr < triangles.end() && ptr->onScreen; ++ptr) {
+			for (int i = 0; i < 3; ++i) {
+				auto &v = vertices.at(ptr->indices[i]);
+				if (v.coordSystem == PROJECTED) {
+					v.position.x = (1 + v.position.x) * (SCREEN_WIDTH / 2);
+					v.position.y = (1 + v.position.y) * (SCREEN_HEIGHT / 2);
+					v.position.z = 1 - v.position.z;
+					v.coordSystem = SCREEN;
+				}
+			}
 		}
 	}
 
+	void sortOverZAndOffScreen() {
+		std::sort(triangles.begin(), triangles.end(), [](PipelineTriangle& first, PipelineTriangle& second) {
+			return first.onScreen && (!second.onScreen || first.zIndex > second.zIndex);
+		});
+	}
+
+
 	void precalculateTriangles() {
-		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
+		for (auto ptr = triangles.begin(); ptr < triangles.end() && ptr->onScreen; ++ptr) {
 			ptr->calcBarycentric(vertices);
-			ptr->calcZIndex(vertices);
 			ptr->calcLines(vertices);
 		}
 	}
+
 
 	void renderZBuffer() {
 		if (!enableZTest) {
 			return;
 		}
 
-		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
+		for (auto ptr = triangles.begin(); ptr < triangles.end() && ptr->onScreen; ++ptr) {
 			Naive_Vertex& a = vertices[ptr->indices[0]];
 			Naive_Vertex& b = vertices[ptr->indices[1]];
 			Naive_Vertex& c = vertices[ptr->indices[2]];
@@ -468,7 +519,7 @@ struct Pipeline {
 	}
 
 	void renderBackbuffer() {
-		for (auto ptr = triangles.begin(); ptr < triangles.end(); ++ptr) {
+		for (auto ptr = triangles.begin(); ptr < triangles.end() && ptr->onScreen; ++ptr) {
 			Naive_Vertex& a = vertices[ptr->indices[0]];
 			Naive_Vertex& b = vertices[ptr->indices[1]];
 			Naive_Vertex& c = vertices[ptr->indices[2]];
@@ -513,9 +564,7 @@ struct Pipeline {
 				Naive_SetBackbufferPoint(x, y, v*256, v * 256, v * 256);
 			}
 		}
-		
 	}
-
 };
 
 
@@ -591,8 +640,11 @@ void precalcLambda(BaryPrecalcLambdas& ret, BarycentricForTriangle& coords) {
 	ret.y3 = y3;
 }
 
-Shape generateFaceAt(real c) {
-	return { { {-50,-50, c}, {50,-50, c}, {50,50, c}, {-50,50, c} } };
+Shape generateFaceAt(real x, real y, real c) {
+	real w = 50;
+	real h = 50;
+
+	return { { {-w+x,-h+y, c}, {w+x,-h+y, c}, {w+x,h+y, c}, {-w+x,h+y, c} } };
 }
 
 void Naive_FlushBuffer() {
@@ -643,11 +695,11 @@ void renderFrame() {
 	M44 rotX{}; rotX.InitAsRotateY(angleX);
 
 	p.worldTransform.Mult(rotX);
-	p.worldTransform.Mult(rotY);
-	//p.worldTransform.Mult(rotZ);
+	//p.worldTransform.Mult(rotY);
+	p.worldTransform.Mult(rotZ);
 
-	double far = 900;
-	double near = 40;
+	double far = 120;
+	double near = 20;
 
 	if (useOrtho) {
 		p.projection.InitAsOrthographic(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, far, near);
@@ -667,6 +719,8 @@ void renderFrame() {
 
 	p.applyWorldTransformation();
 	p.applyProjection();
+	p.applyClipping();
+	p.sortOverZAndOffScreen();
 	p.applyToScreen();
 	p.precalculateTriangles();
 	p.renderZBuffer();
@@ -680,18 +734,21 @@ void renderFrame() {
 	SDL_UnlockTexture(backTexture);
 	Naive_FlushBuffer();
 	SDL_RenderPresent(renderer);
-	if (!paused) {
-		++frame;
-		cout << "FRAME: " << frame << endl;
-	}
+}
+
+void updateFrame(int offset) {
+	frame += offset;
+	cout << "FRAME: " << frame << endl;
+
 }
 
 int main(int argc, char* argv[])
 {
-	for (int i = -10; i <= 20; i+=10) {
-		allShapes.push_back(generateFaceAt(i));
+	for (int x = -1; x <= 1; ++x) {
+		for (int y = -1; y <= 1; ++y) {
+			allShapes.push_back(generateFaceAt(x*120, y*120, 0));
+		}
 	}
-
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		cout << "Error initializing SDL: " << SDL_GetError() << endl;
@@ -736,11 +793,13 @@ int main(int argc, char* argv[])
 				if (e.type == SDL_KEYUP) {
 
 					if (key == SDL_SCANCODE_R) {
-						++frame;
+						updateFrame(1);
+						renderFrame();
 					}
 
 					if (key == SDL_SCANCODE_Q) {
-						--frame;
+						updateFrame(-1);
+						renderFrame();
 					}
 
 					if (key == SDL_SCANCODE_O) {
@@ -749,6 +808,11 @@ int main(int argc, char* argv[])
 
 					if (key == SDL_SCANCODE_P) {
 						paused = !paused;
+						cout << "PAUSED " << paused << endl;
+					}
+
+					if (key == SDL_SCANCODE_W) {
+						render = !render;
 					}
 
 					if (key == SDL_SCANCODE_Z) {
@@ -769,6 +833,9 @@ int main(int argc, char* argv[])
 
 			}
 			else if (e.type == globalCustomEventId) {
+				if (!paused) {
+					updateFrame(1);
+				}
 				renderFrame();
 			}
 			else if (e.type == SDL_QUIT) {
