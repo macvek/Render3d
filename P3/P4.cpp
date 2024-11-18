@@ -104,17 +104,17 @@ struct M44 {
 	}
 
 	void InitAsOrthographic(real right, real top, real far, real near) {
-		m[0][0] = 1 / right;	m[0][1] = 0;	 m[0][2] = 0;			  m[0][3] = 0;
-		m[1][0] = 0;		m[1][1] = 1 / top; m[1][2] = 0;			  m[1][3] = 0;
-		m[2][0] = 0;		m[2][1] = 0;	 m[2][2] = -2 / (far - near); m[2][3] = -(far + near) / (far - near);
-		m[3][0] = 0;		m[3][1] = 0;	 m[3][2] = 0;			  m[3][3] = 1;
+		m[0][0] = 1 / right;	m[0][1] = 0;		m[0][2] = 0;				m[0][3] = 0;
+		m[1][0] = 0;			m[1][1] = 1 / top;	m[1][2] = 0;				m[1][3] = 0;
+		m[2][0] = 0;			m[2][1] = 0;		m[2][2] = -2 / (far - near);m[2][3] = -(far + near) / (far - near);
+		m[3][0] = 0;			m[3][1] = 0;		m[3][2] = 0;				m[3][3] = 1;
 	}
 
 	void InitAsPerspective(real right, real top, real far, real near) {
-		m[0][0] = near / right; m[0][1] = 0;		  m[0][2] = 0;			  m[0][3] = 0;
-		m[1][0] = 0;		  m[1][1] = near / top; m[1][2] = 0;			  m[1][3] = 0;
-		m[2][0] = 0;		  m[2][1] = 0;		  m[2][2] = -(far + near) / (far - near); m[2][3] = -2 * far * near / (far - near);
-		m[3][0] = 0;		  m[3][1] = 0;		  m[3][2] = -1;			  m[3][3] = 0;
+		m[0][0] = near / right; m[0][1] = 0;		  m[0][2] = 0;							 m[0][3] = 0;
+		m[1][0] = 0;			m[1][1] = near / top; m[1][2] = 0;							 m[1][3] = 0;
+		m[2][0] = 0;			m[2][1] = 0;		  m[2][2] = -(far + near) / (far - near);m[2][3] = -2 * far * near / (far - near);
+		m[3][0] = 0;			m[3][1] = 0;		  m[3][2] = -1;							 m[3][3] = 0;
 	}
 
 	void FillFrom(M44& s) {
@@ -248,6 +248,8 @@ struct PipelineTriangle { // indices pointing to pipeline->vertices in pipeline
 		const Naive_Vertex& b = vertices[indices[1]];
 		const Naive_Vertex& c = vertices[indices[2]];
 
+		zIndex = std::max<real>(a.position.z, b.position.z);
+		zIndex = std::max<real>(zIndex, c.position.z);
 
 	}
 
@@ -642,7 +644,7 @@ void renderFrame() {
 	p.worldTransform.Mult(rotY);
 	//p.worldTransform.Mult(rotZ);
 
-	double far = 150;
+	double far = 120;
 	double near = 10;
 
 	if (useOrtho) {
