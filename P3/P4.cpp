@@ -696,9 +696,9 @@ void renderFrame() {
 
 	p.worldTransform.Mult(rotX);
 	//p.worldTransform.Mult(rotY);
-	p.worldTransform.Mult(rotZ);
+	//p.worldTransform.Mult(rotZ);
 
-	double far = 120;
+	double far = 250;
 	double near = 20;
 
 	if (useOrtho) {
@@ -718,6 +718,7 @@ void renderFrame() {
 	}
 
 	p.applyWorldTransformation();
+	// TODO: before projection, clipping must be performed based on clipping planes, more here: https://gabrielgambetta.com/computer-graphics-from-scratch/11-clipping.html
 	p.applyProjection();
 	p.applyClipping();
 	p.sortOverZAndOffScreen();
@@ -746,6 +747,7 @@ int main(int argc, char* argv[])
 {
 	for (int x = -1; x <= 1; ++x) {
 		for (int y = -1; y <= 1; ++y) {
+			if (x == -1 && y == 0)
 			allShapes.push_back(generateFaceAt(x*120, y*120, 0));
 		}
 	}
@@ -834,7 +836,7 @@ int main(int argc, char* argv[])
 			}
 			else if (e.type == globalCustomEventId) {
 				if (!paused) {
-					updateFrame(1);
+					updateFrame(5);
 				}
 				renderFrame();
 			}
