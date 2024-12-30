@@ -695,8 +695,8 @@ void renderFrame() {
 	M44 rotX{}; rotX.InitAsRotateY(angleX);
 
 	p.worldTransform.Mult(rotX);
-	//p.worldTransform.Mult(rotY);
-	//p.worldTransform.Mult(rotZ);
+	p.worldTransform.Mult(rotY);
+	p.worldTransform.Mult(rotZ);
 
 	double far = 250;
 	double near = 20;
@@ -745,12 +745,10 @@ void updateFrame(int offset) {
 
 int main(int argc, char* argv[])
 {
-	for (int x = -1; x <= 1; ++x) {
-		for (int y = -1; y <= 1; ++y) {
-			if (x == -1 && y == 0)
-			allShapes.push_back(generateFaceAt(x*120, y*120, 0));
-		}
+	for (int i = 0; i < 30; i += 5) {
+		allShapes.push_back(generateFaceAt(0, 0, i));
 	}
+	
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		cout << "Error initializing SDL: " << SDL_GetError() << endl;
@@ -836,7 +834,7 @@ int main(int argc, char* argv[])
 			}
 			else if (e.type == globalCustomEventId) {
 				if (!paused) {
-					updateFrame(5);
+					updateFrame(1);
 				}
 				renderFrame();
 			}
