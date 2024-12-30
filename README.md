@@ -1,8 +1,5 @@
-# Asteroids
+# Render3d
 
-Yet another simple single file C++ game to survive in space.
-Check [releases](https://github.com/macvek/Asteroids/releases) for downloads.
+Naivly written 3d renderer. So far is shows few planes getting rotated. This version only colors trianges using rgb, still lacks clipping near plane which causes glitches if it vertex gets behind view.
 
-
-https://github.com/macvek/Asteroids/releases/download/asteroids/demo.mp4
-
+Vertices are ordered using zIndex buffer.
